@@ -1,0 +1,5 @@
+PyQt6>=6.6.0
+openai>=1.12.0
+fpdf2>=2.7.0
+pdfplumber>=0.10.0
+python-dotenv>=1.0.0

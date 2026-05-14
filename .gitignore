@@ -1,0 +1,35 @@
+# Secrets — never commit the real API key
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# PyInstaller artefacts
+*.spec.bak
+*.toc
+*.pkg
+*.exe
+
+# Logs / build output
+logs/*.log
+build_log.txt
+
+# IDE / OS
+.vscode/settings.json
+.idea/
+*.DS_Store
+Thumbs.db
+
+# Test output
+test_output/
+assets/embedded_check.png
