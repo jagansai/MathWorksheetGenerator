@@ -14,7 +14,8 @@ build/
 venv/
 env/
 
-# PyInstaller artefacts
+# PyInstaller artefacts — spec is regenerated on every build, no need to track it
+*.spec
 *.spec.bak
 *.toc
 *.pkg
