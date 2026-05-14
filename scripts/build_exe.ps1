@@ -24,6 +24,23 @@ function Write-OK($msg)   { Write-Host "   OK  $msg" -ForegroundColor Green }
 function Write-Fail($msg) { Write-Host "   ERR $msg" -ForegroundColor Red; Pop-Location; exit 1 }
 
 # ---------------------------------------------------------------------------
+# 0. Git: pull latest if working tree is clean
+# ---------------------------------------------------------------------------
+Write-Step 'Checking for local changes'
+$gitStatus = git status --porcelain 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host '   Not a git repo or git not found — skipping pull.' -ForegroundColor Yellow
+} elseif ([string]::IsNullOrWhiteSpace($gitStatus)) {
+    Write-OK 'Working tree clean — pulling latest from develop.'
+    git pull origin develop
+    if ($LASTEXITCODE -ne 0) { Write-Fail 'git pull failed.' }
+    Write-OK 'Pull complete.'
+} else {
+    Write-Host '   Local changes detected — skipping pull, building from current state.' -ForegroundColor Yellow
+    Write-Host ($gitStatus -split "`n" | ForEach-Object { "      $_" } | Out-String).TrimEnd()
+}
+
+# ---------------------------------------------------------------------------
 # 1. Python check
 # ---------------------------------------------------------------------------
 Write-Step 'Checking Python'
