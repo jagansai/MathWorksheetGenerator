@@ -1,5 +1,6 @@
 """Options panel: topic description, difficulty, question count, output directory."""
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QGroupBox,
@@ -31,27 +32,34 @@ class OptionsPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
 
-        # ---- Topic description ----
-        topic_group = QGroupBox('Topic Description')
+        # ---- Topic description + approval ----
+        topic_group = QGroupBox('Analyzed Content')
         tg_layout = QVBoxLayout(topic_group)
         tg_layout.setSpacing(6)
 
         hint = QLabel(
-            'Auto-filled when you upload an image. You can edit before generating.'
+            'Auto-filled from your uploaded file. Review and edit if needed, then approve below.'
         )
         hint.setStyleSheet('color: #777; font-size: 10px;')
         hint.setWordWrap(True)
 
         self.topic_edit = QTextEdit()
         self.topic_edit.setPlaceholderText(
-            'Upload an image to auto-extract the topic, or type a description here.\n\n'
-            'Example: "Linear equations in one variable, Grade 8. '
-            'Problems involve isolating x using addition, subtraction, '
-            'multiplication and division."'
+            'Upload an image or PDF to auto-extract the topic and sample problems,\n'
+            'or type a description here.\n\n'
+            'After analysis, this area will show the detected topic summary followed by\n'
+            'representative sample problems from your source material.'
         )
-        self.topic_edit.setMinimumHeight(130)
+        self.topic_edit.setMinimumHeight(200)
+
+        self.approve_check = QCheckBox('Content looks correct — enable Generate Worksheet')
+        self.approve_check.setStyleSheet('font-weight: bold; color: #2e7d32;')
+
+        self.topic_edit.textChanged.connect(lambda: self.approve_check.setChecked(False))
+
         tg_layout.addWidget(hint)
         tg_layout.addWidget(self.topic_edit)
+        tg_layout.addWidget(self.approve_check)
 
         # ---- Worksheet settings ----
         ws_group = QGroupBox('Worksheet Settings')
@@ -125,3 +133,9 @@ class OptionsPanel(QWidget):
     def get_output_dir(self) -> str:
         d = self.output_edit.text().strip()
         return d if d else self._config.get_output_directory()
+
+    def get_approved(self) -> bool:
+        return self.approve_check.isChecked()
+
+    def reset_approval(self):
+        self.approve_check.setChecked(False)

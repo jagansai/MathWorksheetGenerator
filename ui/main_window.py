@@ -60,7 +60,7 @@ class MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(6)
 
-        self._image_panel = ImagePanel()
+        self._image_panel = ImagePanel(self._config)
         self._image_panel.images_changed.connect(self._on_images_list_changed)
         self._image_panel.analyze_requested.connect(self._on_analyze_requested)
 
@@ -95,6 +95,8 @@ class MainWindow(QMainWindow):
             QPushButton:disabled { background-color: #b0b0b0; color: #e0e0e0; }
         """)
         self._generate_btn.clicked.connect(self._on_generate)
+        self._generate_btn.setEnabled(False)
+        self._options_panel.approve_check.toggled.connect(self._generate_btn.setEnabled)
         root.addWidget(self._generate_btn, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         # Status bar
@@ -134,6 +136,7 @@ class MainWindow(QMainWindow):
         if not paths:
             self._cancel_analysis_workers()
             self._options_panel.set_topic('')
+            self._options_panel.reset_approval()
             self._generate_btn.setEnabled(False)
             self._status.showMessage(
                 'Ready.  Upload files then click Analyze Files to get started.'
@@ -170,13 +173,14 @@ class MainWindow(QMainWindow):
             return
 
         self._cancel_analysis_workers()
+        self._options_panel.reset_approval()
         self._image_panel.set_analyzing(True)
         self._generate_btn.setEnabled(False)
 
         if pdfs:
             n = len(pdfs)
             self._status.showMessage(f'Extracting and analyzing {n} PDF{"s" if n > 1 else ""}...')
-            self._pdf_worker = PDFAnalysisWorker(self._ai, pdfs)
+            self._pdf_worker = PDFAnalysisWorker(self._ai, pdfs, self._config)
             self._pdf_worker.finished.connect(self._on_analysis_done)
             self._pdf_worker.error.connect(self._on_analysis_error)
             self._pdf_worker.start()
@@ -191,20 +195,19 @@ class MainWindow(QMainWindow):
     def _on_analysis_done(self, topic: str):
         self._image_panel.set_analyzing(False)
         self._options_panel.set_topic(topic)
-        self._generate_btn.setEnabled(True)
         self._status.showMessage(
-            'Topic extracted. Review the description, choose options, then click Generate.'
+            'Analysis complete. Review the content above, tick the checkbox, then click Generate.'
         )
         logger.info('Image analysis complete.')
 
     def _on_analysis_error(self, error: str):
         self._image_panel.set_analyzing(False)
-        self._generate_btn.setEnabled(True)
         self._status.showMessage(f'Image analysis failed: {error}')
         QMessageBox.warning(
             self, 'Image Analysis Failed',
-            f'Could not analyze the image automatically:\n\n{error}\n\n'
-            'You can manually type the topic description in the right panel.',
+            f'Could not analyze the file automatically:\n\n{error}\n\n'
+            'You can manually type the topic description in the right panel,\n'
+            'then tick the checkbox to enable Generate.',
         )
 
     def _on_generate(self):
@@ -246,7 +249,7 @@ class MainWindow(QMainWindow):
     def _on_generation_done(self, student_path: str, teacher_path: str):
         if self._progress:
             self._progress.accept()
-        self._generate_btn.setEnabled(True)
+        self._generate_btn.setEnabled(self._options_panel.get_approved())
 
         folder = os.path.dirname(student_path)
         self._status.showMessage(f'Done!  Files saved to: {folder}')
@@ -270,7 +273,7 @@ class MainWindow(QMainWindow):
     def _on_generation_error(self, error: str):
         if self._progress:
             self._progress.accept()
-        self._generate_btn.setEnabled(True)
+        self._generate_btn.setEnabled(self._options_panel.get_approved())
         self._status.showMessage('Generation failed.')
         QMessageBox.critical(
             self, 'Generation Failed',

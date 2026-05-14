@@ -9,15 +9,6 @@ from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-# groq_api_key is intentionally absent here — it lives in .env, not config.json
-DEFAULT_CONFIG = {
-    "text_model": "llama-3.3-70b-versatile",
-    "vision_model": "meta-llama/llama-4-scout-17b-16e-instruct",
-    "output_directory": "",
-    "default_num_questions": 10,
-    "default_difficulty": "Intermediate",
-}
-
 
 def _get_app_dir() -> str:
     if getattr(sys, 'frozen', False):
@@ -30,21 +21,28 @@ class ConfigManager:
         self._app_dir = _get_app_dir()
         self._config_path = os.path.join(self._app_dir, 'config', 'config.json')
         self._env_path = os.path.join(self._app_dir, '.env')
-        self._config = dict(DEFAULT_CONFIG)
+        self._config: dict = {}
         self._load()
 
     def _load(self):
-        # Load non-secret settings from config.json
-        if os.path.exists(self._config_path):
-            try:
-                with open(self._config_path, 'r', encoding='utf-8') as f:
-                    saved = json.load(f)
-                # Accept legacy configs that stored the key in JSON
-                saved.pop('groq_api_key', None)
-                self._config.update(saved)
-                logger.debug('Config loaded from %s', self._config_path)
-            except Exception as e:
-                logger.error('Failed to load config: %s', e)
+        # config.json is the single source of truth — fail fast if missing
+        if not os.path.exists(self._config_path):
+            raise FileNotFoundError(
+                f'Configuration file not found:\n{self._config_path}\n\n'
+                'Reinstall the application to restore it.'
+            )
+        try:
+            with open(self._config_path, 'r', encoding='utf-8') as f:
+                saved = json.load(f)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f'Configuration file is corrupted:\n{self._config_path}\n\n{exc}'
+            ) from exc
+
+        # groq_api_key is intentionally absent here — it lives in .env, not config.json
+        saved.pop('groq_api_key', None)
+        self._config = saved
+        logger.debug('Config loaded from %s', self._config_path)
 
         # Load GROQ_API_KEY from .env (creates an empty file if missing)
         if not os.path.exists(self._env_path):
@@ -68,7 +66,7 @@ class ConfigManager:
 
         # Persist the API key to .env
         try:
-            set_key(self._env_path, 'GROQ_API_KEY', self._config.get('groq_api_key', ''))
+            set_key(self._env_path, 'GROQ_API_KEY', self._config.get('groq_api_key', '')) # pyright: ignore[reportUnusedCallResult]
             logger.debug('GROQ_API_KEY written to .env')
         except Exception as e:
             logger.error('Failed to write .env: %s', e)

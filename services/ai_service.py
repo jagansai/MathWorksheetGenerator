@@ -113,6 +113,40 @@ class AIService:
         )
         return response.choices[0].message.content.strip()
 
+    async def extract_style_examples(self, raw_text: str) -> str:
+        """Scan raw extracted content and return 4-6 representative exercise problems verbatim.
+
+        These are fed back into generate_questions as few-shot style examples so the AI
+        matches the source material's problem types and real-world contexts.
+        Returns an empty string when no exercise problems are found.
+        """
+        model = self._config.get('text_model', 'llama-3.3-70b-versatile')
+        logger.info('Extracting style examples with text model: %s', model)
+
+        prompt = (
+            'Below is text extracted from a math textbook or worksheet.\n'
+            'Find 4 to 6 ACTUAL EXERCISE PROBLEMS from the text — problems students are asked to solve. '
+            'Select problems that show VARIETY across the different sections: '
+            'include word problems, computational problems, pattern/sequence problems, '
+            'and table/graph problems if present. Prioritise problems from later sections over '
+            'the opening introductory examples.\n\n'
+            'Return ONLY a numbered list of the problems, copied VERBATIM from the source. '
+            'Do NOT rewrite, summarise, or add any explanation. '
+            'If the text contains no exercise problems, return exactly the word: NONE\n\n'
+            f'Text:\n{raw_text[:6000]}'
+        )
+
+        client = self._client()
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[{'role': 'user', 'content': prompt}],
+            max_tokens=1024,
+            temperature=0,
+            timeout=60,
+        )
+        result = response.choices[0].message.content.strip()
+        return '' if result.upper() == 'NONE' else result
+
     async def generate_questions(
         self, topic: str, difficulty: str, num_questions: int
     ) -> list:
@@ -126,7 +160,12 @@ class AIService:
 
         prompt = (
             f'You are an experienced math teacher creating a printed practice worksheet.\n\n'
-            f'Topic description:\n{topic}\n\n'
+            f'Content and style reference:\n{topic}\n\n'
+            f'If the content above includes a "── Sample problems from source ──" section, '
+            f'generate questions that CLOSELY MATCH the style, real-world contexts, and problem '
+            f'types shown in those samples — same structural patterns and variety, but with '
+            f'different numbers and scenarios. Cover the FULL RANGE of problem types shown, '
+            f'not just the simplest ones.\n\n'
             f'Difficulty: {difficulty} — {guidance}\n\n'
             f'Generate exactly {num_questions} distinct math problems.\n\n'
             f'CRITICAL RULES:\n'

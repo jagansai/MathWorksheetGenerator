@@ -44,7 +44,11 @@ def main():
     if os.path.exists(_icon_path):
         app.setWindowIcon(QIcon(_icon_path))
 
-    config = ConfigManager()
+    try:
+        config = ConfigManager()
+    except (FileNotFoundError, ValueError) as exc:
+        QMessageBox.critical(None, 'Startup Error', str(exc))
+        sys.exit(1)
 
     # First-run: prompt for API key
     if not config.get('groq_api_key'):

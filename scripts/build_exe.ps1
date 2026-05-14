@@ -52,7 +52,8 @@ Write-OK $pyVer
 # 2. Install / upgrade all runtime dependencies
 # ---------------------------------------------------------------------------
 Write-Step 'Installing runtime requirements'
-pip install -r requirements.txt --quiet
+# Use "python -m pip" so the correct pip is always chosen regardless of PATH.
+python -m pip install -r requirements.txt --quiet
 if ($LASTEXITCODE -ne 0) { Write-Fail 'pip install -r requirements.txt failed.' }
 Write-OK 'Runtime dependencies ready.'
 
@@ -60,13 +61,15 @@ Write-OK 'Runtime dependencies ready.'
 # 3. Ensure PyInstaller is available
 # ---------------------------------------------------------------------------
 Write-Step 'Checking PyInstaller'
-pyinstaller --version 2>&1 | Out-Null
+# Use "python -m PyInstaller" — avoids the common issue where the pyinstaller
+# console script is installed to Python\Scripts\ but that folder is not in PATH.
+python -m PyInstaller --version 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Host '   PyInstaller not found — installing...' -ForegroundColor Yellow
-    pip install pyinstaller --quiet
+    python -m pip install pyinstaller --quiet
     if ($LASTEXITCODE -ne 0) { Write-Fail 'Could not install PyInstaller.' }
 }
-Write-OK "PyInstaller $(pyinstaller --version 2>&1)"
+Write-OK "PyInstaller $(python -m PyInstaller --version 2>&1)"
 
 # ---------------------------------------------------------------------------
 # 4. Clean previous artifacts (always clean onedir target; full clean if -Clean)
@@ -79,8 +82,9 @@ if ($Clean) {
     Write-OK 'Full clean done.'
 } else {
     Remove-Item -Recurse -Force (Join-Path $DistDir $AppName) -ErrorAction SilentlyContinue
-    Remove-Item -Force "$AppName.spec"                        -ErrorAction SilentlyContinue
-    Write-OK 'Previous build target removed.'
+    Remove-Item -Recurse -Force $BuildDir                        -ErrorAction SilentlyContinue
+    Remove-Item -Force "$AppName.spec"                          -ErrorAction SilentlyContinue
+    Write-OK 'Previous build artifacts removed.'
 }
 
 # ---------------------------------------------------------------------------
@@ -94,8 +98,7 @@ $pyiArgs = @(
     '--name',           $AppName,
     '--windowed',                          # no console window
     '--noconfirm',
-    '--add-data',       "config;config",   # bundle config/ folder
-    '--add-data',       "logs/.gitkeep;logs",  # create logs/ dir in the bundle
+    '--paths',          '.',               # ensure project root is on sys.path during analysis
     '--add-data',       "assets;assets",   # app icon and other assets
     '--icon',           "assets/icon.ico", # embed icon in the .exe file
     '--collect-all',    'pdfplumber',      # includes pdfplumber's own data files
@@ -109,12 +112,29 @@ $pyiArgs = @(
     'main.py'
 )
 
-& pyinstaller @pyiArgs
+& python -m PyInstaller @pyiArgs
 
 if ($LASTEXITCODE -ne 0) { Write-Fail 'PyInstaller reported errors. See output above.' }
 
 # ---------------------------------------------------------------------------
-# 6. Locate and report the output
+# 7. Copy config and create logs folder next to the executable
+# ---------------------------------------------------------------------------
+Write-Step 'Copying runtime files'
+
+if (-not $OneFile) {
+    $outDir = Join-Path $DistDir $AppName
+
+    # config\ must live beside the .exe so ConfigManager can find and write it
+    $configDst = Join-Path $outDir 'config'
+    New-Item -ItemType Directory -Force -Path $configDst | Out-Null
+    Copy-Item -Path (Join-Path $ProjectRoot 'config\config.json') -Destination $configDst -Force
+    Write-OK "config\config.json  →  $configDst"
+
+    # Create an empty logs\ folder so the logger can write on first run
+    $logsDst = Join-Path $outDir 'logs'
+    New-Item -ItemType Directory -Force -Path $logsDst | Out-Null
+    Write-OK "logs\  created at $logsDst"
+}
 # ---------------------------------------------------------------------------
 Write-Step 'Build complete'
 
@@ -132,8 +152,8 @@ if (Test-Path $exePath) {
 }
 
 Write-Host ''
-Write-Host '   NOTE: config\config.json is bundled as a read-only default.' -ForegroundColor Yellow
-Write-Host '         Users can override settings at runtime via File > Settings.' -ForegroundColor Yellow
+Write-Host '   config\config.json is placed beside the exe and is editable by users.' -ForegroundColor Yellow
+Write-Host '   Settings changed at runtime (File > Settings) are saved back there.' -ForegroundColor Yellow
 Write-Host ''
 
 Pop-Location

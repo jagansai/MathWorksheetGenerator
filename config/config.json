@@ -3,5 +3,9 @@
   "vision_model": "meta-llama/llama-4-scout-17b-16e-instruct",
   "output_directory": "",
   "default_num_questions": 10,
-  "default_difficulty": "Intermediate"
+  "default_difficulty": "Intermediate",
+  "max_image_size_mb": 8,
+  "max_pdf_size_mb": 25,
+  "max_files": 10,
+  "max_pdf_pages": 50
 }

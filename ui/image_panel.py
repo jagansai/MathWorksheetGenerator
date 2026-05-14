@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -25,6 +26,8 @@ _IMG_EXTS = {".jpg", ".jpeg", ".png"}
 _PDF_EXTS = {".pdf"}
 _ACCEPTED = _IMG_EXTS | _PDF_EXTS
 _THUMB_W, _THUMB_H = 100, 90
+
+
 
 _STYLE_IDLE = """
     QLabel {
@@ -282,8 +285,9 @@ class ImagePanel(QWidget):
     image_loaded  = pyqtSignal(str)
     image_cleared = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, config_manager, parent=None):
         super().__init__(parent)
+        self._config = config_manager
         self._image_paths: list[str] = []
         self._setup_ui()
         self.setAcceptDrops(True)
@@ -395,9 +399,39 @@ class ImagePanel(QWidget):
             self._add_image(path)
 
     def _add_image(self, path: str):
-        if os.path.splitext(path)[1].lower() not in _ACCEPTED:
+        ext = os.path.splitext(path)[1].lower()
+        if ext not in _ACCEPTED:
             return
         if path in self._image_paths:
+            return
+
+        # --- file-count guard ---
+        max_files = self._config.get('max_files', 10)
+        if len(self._image_paths) >= max_files:
+            QMessageBox.warning(
+                self,
+                'Too Many Files',
+                f'You can upload up to {max_files} files at a time.\n'
+                'Remove some files first, then add more.',
+            )
+            return
+
+        # --- per-file size guard ---
+        size_mb = os.path.getsize(path) / (1024 * 1024)
+        limit_mb = (
+            self._config.get('max_pdf_size_mb', 25)
+            if ext in _PDF_EXTS
+            else self._config.get('max_image_size_mb', 8)
+        )
+        if size_mb > limit_mb:
+            type_label = 'PDF' if ext in _PDF_EXTS else 'image'
+            QMessageBox.warning(
+                self,
+                'File Too Large',
+                f'"{os.path.basename(path)}" is {size_mb:.1f} MB — '
+                f'the limit for {type_label}s is {limit_mb} MB.\n\n'
+                'Please use a smaller or compressed file.',
+            )
             return
 
         self._image_paths.append(path)

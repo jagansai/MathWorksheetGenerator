@@ -52,6 +52,25 @@ python main.py
 
 ---
 
+## First-Time Setup (New PC)
+
+Run this **once** on any new machine before using the app or building:
+
+```powershell
+.\scripts\setup.ps1
+```
+
+What it does for you:
+- Checks that Python 3.9+ is installed and shows the download link if not
+- Upgrades pip
+- Installs all packages from `requirements.txt`
+- Installs PyInstaller
+- Verifies every import works and reports a clear pass/fail summary
+
+> Tip: you can also right-click `scripts\setup.ps1` and choose **Run with PowerShell**.
+
+---
+
 ## Building a Standalone Executable
 
 The build script handles everything — dependency installation, PyInstaller setup,
