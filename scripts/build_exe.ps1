@@ -72,6 +72,20 @@ if ($LASTEXITCODE -ne 0) {
 Write-OK "PyInstaller $(python -m PyInstaller --version 2>&1)"
 
 # ---------------------------------------------------------------------------
+# 3b. Stash .env from previous dist so the API key survives the clean step
+# ---------------------------------------------------------------------------
+$outDir      = Join-Path $DistDir $AppName
+$envInDist   = Join-Path $outDir '.env'
+$envStash    = Join-Path ([System.IO.Path]::GetTempPath()) "${AppName}_env_stash"
+$envStashed  = $false
+
+if (-not $OneFile -and (Test-Path $envInDist)) {
+    Copy-Item -Path $envInDist -Destination $envStash -Force
+    $envStashed = $true
+    Write-Host '   .env found in dist — stashed to temp before clean.' -ForegroundColor Yellow
+}
+
+# ---------------------------------------------------------------------------
 # 4. Clean previous artifacts (always clean onedir target; full clean if -Clean)
 # ---------------------------------------------------------------------------
 Write-Step 'Cleaning old artifacts'
@@ -122,8 +136,6 @@ if ($LASTEXITCODE -ne 0) { Write-Fail 'PyInstaller reported errors. See output a
 Write-Step 'Copying runtime files'
 
 if (-not $OneFile) {
-    $outDir = Join-Path $DistDir $AppName
-
     # config\ must live beside the .exe so ConfigManager can find and write it
     $configDst = Join-Path $outDir 'config'
     New-Item -ItemType Directory -Force -Path $configDst | Out-Null
@@ -134,6 +146,13 @@ if (-not $OneFile) {
     $logsDst = Join-Path $outDir 'logs'
     New-Item -ItemType Directory -Force -Path $logsDst | Out-Null
     Write-OK "logs\  created at $logsDst"
+
+    # Restore stashed .env (preserves API key from previous install)
+    if ($envStashed) {
+        Copy-Item -Path $envStash -Destination (Join-Path $outDir '.env') -Force
+        Remove-Item -Force $envStash -ErrorAction SilentlyContinue
+        Write-OK '.env restored from stash — API key preserved.'
+    }
 }
 # ---------------------------------------------------------------------------
 Write-Step 'Build complete'
