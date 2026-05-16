@@ -33,13 +33,26 @@ _DIFFICULTY_GUIDANCE = {
 # Per-subject prompt handlers
 # ---------------------------------------------------------------------------
 
+def _split_into_segments(text: str, n: int = 3, min_chars_per_segment: int = 3000) -> list[str]:
+    """Split *text* into *n* roughly equal segments.
+
+    Returns a single-element list (the original text) when the text is too
+    short to benefit from segmentation (i.e. fewer than *n × min_chars_per_segment*
+    characters).
+    """
+    if len(text) < min_chars_per_segment * n:
+        return [text]
+    size = len(text) // n
+    return [text[i * size: (i + 1) * size] for i in range(n)]
+
+
 class _SubjectHandler:
     """Base class — subclass per subject and override the three prompt methods."""
 
     def summarize_prompt(self, raw_text: str) -> str:
         raise NotImplementedError
 
-    def style_examples_prompt(self, raw_text: str) -> str:
+    def style_examples_prompt(self, raw_text: str, segment_label: str = '') -> str:
         raise NotImplementedError
 
     def generate_prompt(
@@ -69,14 +82,21 @@ class _MathHandler(_SubjectHandler):
             f'Content:\n{raw_text[:4000]}'
         )
 
-    def style_examples_prompt(self, raw_text: str) -> str:
+    def style_examples_prompt(self, raw_text: str, segment_label: str = '') -> str:
+        segment_note = (
+            f' This excerpt is from the **{segment_label}** of the chapter,'
+            ' so the problems here are likely more representative of the'
+            ' chapter\'s difficulty than the opening introductory examples.'
+            if segment_label and segment_label != 'beginning'
+            else ''
+        )
         return (
-            'Below is text extracted from a math textbook or worksheet.\n'
-            'Find 4 to 6 ACTUAL EXERCISE PROBLEMS from the text — problems students are asked to solve. '
-            'Select problems that show VARIETY across the different sections: '
+            f'Below is text extracted from a math textbook or worksheet.{segment_note}\n'
+            'Find 2 to 3 ACTUAL EXERCISE PROBLEMS from the text — problems students are asked to solve. '
+            'Select problems that show VARIETY: '
             'include word problems, computational problems, pattern/sequence problems, '
-            'and table/graph problems if present. Prioritise problems from later sections over '
-            'the opening introductory examples.\n\n'
+            'and table/graph problems if present. Prefer problems that test deeper understanding '
+            'over trivial one-step calculations.\n\n'
             'Return ONLY a numbered list of the problems, copied VERBATIM from the source. '
             'Do NOT rewrite, summarise, or add any explanation. '
             'If the text contains no exercise problems, return exactly the word: NONE\n\n'
@@ -93,7 +113,9 @@ class _MathHandler(_SubjectHandler):
             f'generate questions that CLOSELY MATCH the style, real-world contexts, and problem '
             f'types shown in those samples \u2014 same structural patterns and variety, but with '
             f'different numbers and scenarios. Cover the FULL RANGE of problem types shown, '
-            f'not just the simplest ones.\n\n'
+            f'not just the simplest ones. Problems labelled "[From the middle of the chapter]" '
+            f'or "[From the end of the chapter]" represent the intended difficulty level; '
+            f'weight your generated questions accordingly.\n\n'
             f'Difficulty: {difficulty} \u2014 {guidance}\n\n'
             f'Generate exactly {num_questions} distinct math problems.\n\n'
             f'CRITICAL RULES:\n'
@@ -113,20 +135,19 @@ class _MathHandler(_SubjectHandler):
             f'  "final_answer"   \u2014 the concise final answer only (e.g. "x = 4" or "42").\n'
             f'  "needs_grid"     \u2014 true if the student must plot points or draw on a coordinate plane '
             f'to solve the problem, false for all other questions.\n\n'
-            f'Example of correct format:\n'
+            f'REQUIRED JSON FORMAT (these are structural examples only \u2014 '
+            f'do NOT copy or reuse these specific problems):\n'
             f'[\n'
             f'  {{\n'
-            f'    "question": "Solve: 2x + 4 = 12",\n'
-            f'    "solution_steps": ["Subtract 4 from both sides: 2x = 8", "Divide both sides by 2: x = 4"],\n'
-            f'    "final_answer": "x = 4",\n'
+            f'    "question": "<problem statement relevant to the topic above>",\n'
+            f'    "solution_steps": ["<step 1>", "<step 2>", "<step 3>"],\n'
+            f'    "final_answer": "<concise answer>",\n'
             f'    "needs_grid": false\n'
             f'  }},\n'
             f'  {{\n'
-            f'    "question": "Plot the points A(2, 3) and B(-1, 4) on the coordinate plane. '
-            f'Find the length of segment AB.",\n'
-            f'    "solution_steps": ["Mark A(2,3) and B(-1,4) on the grid", '
-            f'"Apply distance formula: d = sqrt((2-(-1))^2 + (3-4)^2) = sqrt(9+1) = sqrt(10)"],\n'
-            f'    "final_answer": "sqrt(10) approx 3.16",\n'
+            f'    "question": "<another problem statement relevant to the topic above>",\n'
+            f'    "solution_steps": ["<step 1>", "<step 2>"],\n'
+            f'    "final_answer": "<concise answer>",\n'
             f'    "needs_grid": true\n'
             f'  }}\n'
             f']'
@@ -161,12 +182,19 @@ class _GenericHandler(_SubjectHandler):
             f'Content:\n{raw_text[:4000]}'
         )
 
-    def style_examples_prompt(self, raw_text: str) -> str:
+    def style_examples_prompt(self, raw_text: str, segment_label: str = '') -> str:
+        segment_note = (
+            f' This excerpt is from the **{segment_label}** of the chapter,'
+            ' so the problems here are likely more representative of the'
+            ' chapter\'s difficulty than the opening introductory examples.'
+            if segment_label and segment_label != 'beginning'
+            else ''
+        )
         return (
-            f'Below is text extracted from a {self._subject} textbook or worksheet.\n'
-            'Find 4 to 6 ACTUAL EXERCISE PROBLEMS from the text \u2014 problems students are asked to solve. '
+            f'Below is text extracted from a {self._subject} textbook or worksheet.{segment_note}\n'
+            'Find 2 to 3 ACTUAL EXERCISE PROBLEMS from the text — problems students are asked to solve. '
             'Select problems that show VARIETY across the different sections. '
-            'Prioritise problems from later sections over the opening introductory examples.\n\n'
+            'Prefer problems that test deeper understanding over trivial one-step calculations.\n\n'
             'Return ONLY a numbered list of the problems, copied VERBATIM from the source. '
             'Do NOT rewrite, summarise, or add any explanation. '
             'If the text contains no exercise problems, return exactly the word: NONE\n\n'
@@ -283,27 +311,60 @@ class AIService:
         return response.choices[0].message.content.strip()
 
     async def extract_style_examples(self, raw_text: str, subject: str = 'Mathematics') -> str:
-        """Return 4-6 representative exercise problems verbatim from the raw content.
+        """Return representative exercise problems verbatim from the raw content.
+
+        When the source text is long enough, it is split into three segments
+        (beginning / middle / end) and sampled in parallel so that harder
+        problems from later in the chapter are included alongside the simpler
+        introductory ones.  Results from all segments are merged.
 
         Dispatches to the per-subject prompt handler.  The results are passed
         back into generate_questions as few-shot style examples.
         Returns an empty string when no exercise problems are found.
         """
+        handler = _get_handler(subject)
         model = self._config.get('text_model', 'llama-3.3-70b-versatile')
         logger.info('Extracting style examples | subject=%s | model=%s', subject, model)
 
-        prompt = _get_handler(subject).style_examples_prompt(raw_text)
-
         client = self._client()
-        response = await client.chat.completions.create(
-            model=model,
-            messages=[{'role': 'user', 'content': prompt}],
-            max_tokens=1024,
-            temperature=0,
-            timeout=60,
+
+        async def _call_segment(prompt: str) -> str:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[{'role': 'user', 'content': prompt}],
+                max_tokens=1024,
+                temperature=0,
+                timeout=60,
+            )
+            return response.choices[0].message.content.strip()
+
+        segments = _split_into_segments(raw_text)
+
+        if len(segments) == 1:
+            # Short document — single call, original behaviour
+            result = await _call_segment(handler.style_examples_prompt(raw_text))
+            return '' if result.upper() == 'NONE' else result
+
+        # Long document — sample beginning, middle, and end in parallel
+        segment_labels = ['beginning', 'middle', 'end']
+        prompts = [
+            handler.style_examples_prompt(seg, label)
+            for seg, label in zip(segments, segment_labels)
+        ]
+        logger.info(
+            'Sampling style examples from %d segments (%s chars each)',
+            len(segments), len(segments[0]),
         )
-        result = response.choices[0].message.content.strip()
-        return '' if result.upper() == 'NONE' else result
+        results = await asyncio.gather(*[_call_segment(p) for p in prompts])
+
+        # Merge non-empty results, labelled by chapter position
+        parts = []
+        for label, result in zip(segment_labels, results):
+            if result and result.upper() != 'NONE':
+                header = f'[Problems from the {label} of the chapter]'
+                parts.append(f'{header}\n{result}')
+
+        return '\n\n'.join(parts)
 
     async def generate_questions(
         self, topic: str, difficulty: str, num_questions: int, subject: str = 'Mathematics'
