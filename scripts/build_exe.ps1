@@ -72,17 +72,25 @@ if ($LASTEXITCODE -ne 0) {
 Write-OK "PyInstaller $(python -m PyInstaller --version 2>&1)"
 
 # ---------------------------------------------------------------------------
-# 3b. Stash .env from previous dist so the API key survives the clean step
+# 3b. Stash .env so the API key survives the clean step.
+#     Priority: existing dist\.env > project-root .env (dev machine)
 # ---------------------------------------------------------------------------
 $outDir      = Join-Path $DistDir $AppName
 $envInDist   = Join-Path $outDir '.env'
+$envInRoot   = Join-Path $ProjectRoot '.env'
 $envStash    = Join-Path ([System.IO.Path]::GetTempPath()) "${AppName}_env_stash"
 $envStashed  = $false
 
-if (-not $OneFile -and (Test-Path $envInDist)) {
-    Copy-Item -Path $envInDist -Destination $envStash -Force
-    $envStashed = $true
-    Write-Host '   .env found in dist — stashed to temp before clean.' -ForegroundColor Yellow
+if (-not $OneFile) {
+    if (Test-Path $envInDist) {
+        Copy-Item -Path $envInDist -Destination $envStash -Force
+        $envStashed = $true
+        Write-Host '   .env found in dist — stashed to temp before clean.' -ForegroundColor Yellow
+    } elseif (Test-Path $envInRoot) {
+        Copy-Item -Path $envInRoot -Destination $envStash -Force
+        $envStashed = $true
+        Write-Host '   .env found in project root — stashed to temp (will be copied to dist).' -ForegroundColor Yellow
+    }
 }
 
 # ---------------------------------------------------------------------------

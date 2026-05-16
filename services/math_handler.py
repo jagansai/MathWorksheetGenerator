@@ -12,7 +12,8 @@ _TYPE_DESCRIPTIONS: dict[QuestionType, str] = {
     QuestionType.MCQ: (
         'multiple-choice with exactly 4 lettered choices (A, B, C, D); '
         'one correct answer and three plausible-but-wrong distractors; '
-        'prefer computational or formula-based stems (no narrative).'
+        'stems may be either computational/formula-based OR word-problem/narrative — '
+        'aim for a roughly even mix of both styles across all MCQ questions.'
     ),
     QuestionType.WORD: (
         'real-world application with a narrative context '
@@ -150,7 +151,7 @@ class _MathHandler(_SubjectHandler):
             if t == QuestionType.MCQ:
                 examples.append(
                     '  {\n'
-                    '    "question": "<computational or formula-based question>",\n'
+                    '    "question": "<computational/formula-based OR word-problem/narrative question>",\n'
                     '    "type": "mcq",\n'
                     '    "choices": ["A) <option>", "B) <option>", "C) <option>", "D) <option>"],\n'
                     '    "correct_choice": "<A|B|C|D>",\n'
