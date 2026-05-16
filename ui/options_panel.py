@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from services.base_handler import QuestionType
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -82,13 +83,32 @@ class OptionsPanel(QWidget):
         num_row = QHBoxLayout()
         num_row.addWidget(QLabel('Number of questions:'))
         self.num_spin = QSpinBox()
-        self.num_spin.setRange(1, 30)
+        self.num_spin.setRange(1, self._config.get('max_num_questions', 25))
         self.num_spin.setValue(self._config.get('default_num_questions', 10))
         num_row.addWidget(self.num_spin)
         num_row.addStretch()
 
         ws_layout.addLayout(diff_row)
         ws_layout.addLayout(num_row)
+
+        # ---- Question types ----
+        qt_group = QGroupBox('Question Types')
+        qt_layout = QVBoxLayout(qt_group)
+        qt_layout.setSpacing(6)
+
+        qt_hint = QLabel('Select one or more types. Questions will be split evenly across selected types.')
+        qt_hint.setStyleSheet('color: #777; font-size: 10px;')
+        qt_hint.setWordWrap(True)
+
+        self.mcq_check = QCheckBox('MCQ (Multiple Choice)')
+        self.word_check = QCheckBox('Word Problems')
+        self.non_word_check = QCheckBox('Non-Word Problems  (computation / formula-based)')
+        self.non_word_check.setChecked(True)
+
+        qt_layout.addWidget(qt_hint)
+        qt_layout.addWidget(self.mcq_check)
+        qt_layout.addWidget(self.word_check)
+        qt_layout.addWidget(self.non_word_check)
 
         # ---- Output directory ----
         out_group = QGroupBox('Output Directory')
@@ -104,6 +124,7 @@ class OptionsPanel(QWidget):
 
         layout.addWidget(topic_group)
         layout.addWidget(ws_group)
+        layout.addWidget(qt_group)
         layout.addWidget(out_group)
         layout.addStretch()
 
@@ -139,3 +160,13 @@ class OptionsPanel(QWidget):
 
     def reset_approval(self):
         self.approve_check.setChecked(False)
+
+    def get_question_types(self) -> list[QuestionType]:
+        types = []
+        if self.mcq_check.isChecked():
+            types.append(QuestionType.MCQ)
+        if self.word_check.isChecked():
+            types.append(QuestionType.WORD)
+        if self.non_word_check.isChecked():
+            types.append(QuestionType.NON_WORD)
+        return types or [QuestionType.NON_WORD]  # fallback: never return empty

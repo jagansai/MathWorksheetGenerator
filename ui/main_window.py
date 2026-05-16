@@ -243,6 +243,7 @@ class MainWindow(QMainWindow):
         difficulty = self._options_panel.get_difficulty()
         num_questions = self._options_panel.get_num_questions()
         output_dir = self._options_panel.get_output_dir()
+        question_types = self._options_panel.get_question_types()
 
         self._generate_btn.setEnabled(False)
 
@@ -252,6 +253,7 @@ class MainWindow(QMainWindow):
         self._worksheet_worker = WorksheetWorker(
             self._ai, self._config,
             topic, difficulty, num_questions, output_dir, self._current_subject,
+            question_types,
         )
         self._worksheet_worker.step_updated.connect(self._progress.set_step)
         self._worksheet_worker.finished.connect(self._on_generation_done)

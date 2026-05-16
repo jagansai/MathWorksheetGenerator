@@ -152,6 +152,42 @@ def _draw_coordinate_grid(pdf: FPDF):
     pdf.set_text_color(0, 0, 0)
     pdf.set_xy(MARGIN, y0 + _GRID_SIZE + 8)
 
+
+# ---------------------------------------------------------------------------
+# MCQ rendering helpers
+# ---------------------------------------------------------------------------
+
+def _render_mcq_choices_student(pdf: FPDF, choices: list):
+    """Render four MCQ choices for the student sheet (no highlighting)."""
+    pdf.set_font('Helvetica', '', 11)
+    for choice in choices:
+        pdf.set_x(MARGIN + 10)
+        pdf.multi_cell(CONTENT_W - 10, LINE_H, _sanitize(str(choice)), align='L', new_x='LMARGIN')
+    pdf.ln(2)
+
+
+def _render_mcq_choices_teacher(pdf: FPDF, choices: list, correct_choice: str):
+    """Render four MCQ choices for the teacher copy, highlighting the correct one in green."""
+    correct = correct_choice.strip().upper() if correct_choice else ''
+    for choice in choices:
+        text = str(choice)
+        letter = text[0].upper() if text else ''
+        is_correct = letter == correct
+        if is_correct:
+            pdf.set_fill_color(220, 245, 220)
+            pdf.set_font('Helvetica', 'B', 10)
+            pdf.set_x(MARGIN + 4)
+            pdf.multi_cell(
+                CONTENT_W - 4, LINE_H,
+                _sanitize(f'\u2713  {text}'),
+                align='L', fill=True, new_x='LMARGIN',
+            )
+            pdf.set_font('Helvetica', '', 10)
+        else:
+            pdf.set_x(MARGIN + 10)
+            pdf.multi_cell(CONTENT_W - 10, LINE_H, _sanitize(f'   {text}'), align='L', new_x='LMARGIN')
+    pdf.ln(2)
+
 # ---------------------------------------------------------------------------
 # Shared PDF base class
 # ---------------------------------------------------------------------------
@@ -208,7 +244,9 @@ def build_student_pdf(questions: list, topic: str, output_path: str):
         pdf.multi_cell(0, LINE_H, _sanitize(f'Q{i}.  {q["question"]}'), align='L', new_x='LMARGIN')
         pdf.ln(1)
 
-        if q.get('needs_grid'):
+        if q.get('type') == 'mcq':
+            _render_mcq_choices_student(pdf, q.get('choices', []))
+        elif q.get('needs_grid'):
             _draw_coordinate_grid(pdf)
         else:
             # Blank working lines
@@ -252,8 +290,10 @@ def build_teacher_pdf(questions: list, topic: str, output_path: str):
         pdf.multi_cell(0, LINE_H, _sanitize(f'Q{i}.  {q["question"]}'), align='L', new_x='LMARGIN')
         pdf.ln(1)
 
-        # Grid (teacher copy shows it so the solution steps are easy to follow)
-        if q.get('needs_grid'):
+        # MCQ choices (teacher copy shows correct answer highlighted)
+        if q.get('type') == 'mcq':
+            _render_mcq_choices_teacher(pdf, q.get('choices', []), q.get('correct_choice', ''))
+        elif q.get('needs_grid'):
             _draw_coordinate_grid(pdf)
             pdf.ln(2)
 

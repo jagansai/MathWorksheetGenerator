@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from services.ai_service import AIService
+from services.base_handler import QuestionType
 from utils.pdf_generator import generate_pdfs
 from utils.logger import setup_logger
 
@@ -103,6 +104,7 @@ class WorksheetWorker(QThread):
         num_questions: int,
         output_dir: str,
         subject: str = 'Mathematics',
+        question_types: list[QuestionType] | None = None,
     ):
         super().__init__()
         self._ai = ai_service
@@ -112,6 +114,7 @@ class WorksheetWorker(QThread):
         self._num_questions = num_questions
         self._output_dir = output_dir
         self._subject = subject
+        self._question_types = question_types or [QuestionType.NON_WORD]
 
     def run(self):
         try:
@@ -125,7 +128,7 @@ class WorksheetWorker(QThread):
             f'Asking AI to generate {self._num_questions} questions ({self._difficulty})...'
         )
         questions = await self._ai.generate_questions(
-            self._topic, self._difficulty, self._num_questions, self._subject
+            self._topic, self._difficulty, self._num_questions, self._subject, self._question_types
         )
         logger.info('Received %d questions from AI', len(questions))
 
