@@ -29,6 +29,189 @@ _DIFFICULTY_GUIDANCE = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Per-subject prompt handlers
+# ---------------------------------------------------------------------------
+
+class _SubjectHandler:
+    """Base class — subclass per subject and override the three prompt methods."""
+
+    def summarize_prompt(self, raw_text: str) -> str:
+        raise NotImplementedError
+
+    def style_examples_prompt(self, raw_text: str) -> str:
+        raise NotImplementedError
+
+    def generate_prompt(
+        self, topic: str, difficulty: str, guidance: str, num_questions: int
+    ) -> str:
+        raise NotImplementedError
+
+
+class _MathHandler(_SubjectHandler):
+    """Prompts tuned for mathematics worksheets."""
+
+    def summarize_prompt(self, raw_text: str) -> str:
+        return (
+            'You are helping generate a standalone math practice worksheet. '
+            'Below is content extracted from a math resource. '
+            'Identify the mathematical SKILLS and PROBLEM TYPES that students would actually practise — '
+            'ignore historical context, biographies, introductory theory, and any non-problem text. '
+            'Fill in EXACTLY this template — no extra text before or after, no markdown, no bullet symbols:\n\n'
+            'Topic: <specific math topic, e.g. "Cartesian coordinate system — plotting and reading points">\n'
+            'Grade level: <approximate grade, e.g. "Grade 9">\n'
+            'Problem types: <comma-separated list of practice problem types, e.g. "plotting points, reading coordinates, finding distances">\n'
+            'Notation/constraints: <specific notation or constraints, e.g. "integer coordinates, all four quadrants">\n\n'
+            'RULES: '
+            'Do NOT mention textbook names, book titles, chapter numbers, page numbers, '
+            'image numbers, historical figures, or any source references. '
+            'Every field must be filled; write "Standard notation" if no special constraints apply.\n\n'
+            f'Content:\n{raw_text[:4000]}'
+        )
+
+    def style_examples_prompt(self, raw_text: str) -> str:
+        return (
+            'Below is text extracted from a math textbook or worksheet.\n'
+            'Find 4 to 6 ACTUAL EXERCISE PROBLEMS from the text — problems students are asked to solve. '
+            'Select problems that show VARIETY across the different sections: '
+            'include word problems, computational problems, pattern/sequence problems, '
+            'and table/graph problems if present. Prioritise problems from later sections over '
+            'the opening introductory examples.\n\n'
+            'Return ONLY a numbered list of the problems, copied VERBATIM from the source. '
+            'Do NOT rewrite, summarise, or add any explanation. '
+            'If the text contains no exercise problems, return exactly the word: NONE\n\n'
+            f'Text:\n{raw_text[:6000]}'
+        )
+
+    def generate_prompt(
+        self, topic: str, difficulty: str, guidance: str, num_questions: int
+    ) -> str:
+        return (
+            f'You are an experienced math teacher creating a printed practice worksheet.\n\n'
+            f'Content and style reference:\n{topic}\n\n'
+            f'If the content above includes a "\u2500\u2500 Sample problems from source \u2500\u2500" section, '
+            f'generate questions that CLOSELY MATCH the style, real-world contexts, and problem '
+            f'types shown in those samples \u2014 same structural patterns and variety, but with '
+            f'different numbers and scenarios. Cover the FULL RANGE of problem types shown, '
+            f'not just the simplest ones.\n\n'
+            f'Difficulty: {difficulty} \u2014 {guidance}\n\n'
+            f'Generate exactly {num_questions} distinct math problems.\n\n'
+            f'CRITICAL RULES:\n'
+            f'1. Every question must be 100% self-contained in its text. '
+            f'Do NOT reference "the image", "the figure", "the graph shown", "the diagram", '
+            f'"the table above", "the textbook", or any external visual material.\n'
+            f'2. Students will receive a plain printed sheet. '
+            f'If a problem involves a coordinate plane, describe all points and coordinates '
+            f'directly in the question text (e.g. "Plot the points A(2,3), B(-1,4) and find..."). '
+            f'A blank coordinate grid will be printed below questions that need one.\n'
+            f'3. Use plain-text math notation (e.g. x^2 + 3x - 4 = 0, not LaTeX).\n\n'
+            f'IMPORTANT: Return ONLY a valid JSON array \u2014 no markdown, no code fences, '
+            f'no explanatory text before or after.\n\n'
+            f'Each object in the array must have exactly these keys:\n'
+            f'  "question"       \u2014 the problem statement following the rules above.\n'
+            f'  "solution_steps" \u2014 a JSON array of strings, one string per step (minimum 2 steps).\n'
+            f'  "final_answer"   \u2014 the concise final answer only (e.g. "x = 4" or "42").\n'
+            f'  "needs_grid"     \u2014 true if the student must plot points or draw on a coordinate plane '
+            f'to solve the problem, false for all other questions.\n\n'
+            f'Example of correct format:\n'
+            f'[\n'
+            f'  {{\n'
+            f'    "question": "Solve: 2x + 4 = 12",\n'
+            f'    "solution_steps": ["Subtract 4 from both sides: 2x = 8", "Divide both sides by 2: x = 4"],\n'
+            f'    "final_answer": "x = 4",\n'
+            f'    "needs_grid": false\n'
+            f'  }},\n'
+            f'  {{\n'
+            f'    "question": "Plot the points A(2, 3) and B(-1, 4) on the coordinate plane. '
+            f'Find the length of segment AB.",\n'
+            f'    "solution_steps": ["Mark A(2,3) and B(-1,4) on the grid", '
+            f'"Apply distance formula: d = sqrt((2-(-1))^2 + (3-4)^2) = sqrt(9+1) = sqrt(10)"],\n'
+            f'    "final_answer": "sqrt(10) approx 3.16",\n'
+            f'    "needs_grid": true\n'
+            f'  }}\n'
+            f']'
+        )
+
+
+class _GenericHandler(_SubjectHandler):
+    """Placeholder handler for subjects not yet fully implemented.
+
+    Uses the same structure as _MathHandler but replaces math-specific framing
+    with the subject name.  Replace with a dedicated handler in Phase 2.
+    """
+
+    def __init__(self, subject: str):
+        self._subject = subject
+
+    def summarize_prompt(self, raw_text: str) -> str:
+        return (
+            f'You are helping generate a standalone {self._subject} practice worksheet. '
+            f'Below is content extracted from a {self._subject} resource. '
+            f'Identify the SKILLS and PROBLEM TYPES that students would actually practise \u2014 '
+            'ignore historical context, biographies, introductory theory, and any non-problem text. '
+            'Fill in EXACTLY this template \u2014 no extra text before or after, no markdown, no bullet symbols:\n\n'
+            f'Topic: <specific {self._subject} topic>\n'
+            'Grade level: <approximate grade, e.g. "Grade 9">\n'
+            'Problem types: <comma-separated list of practice problem types>\n'
+            'Notation/constraints: <specific notation or constraints>\n\n'
+            'RULES: '
+            'Do NOT mention textbook names, book titles, chapter numbers, page numbers, '
+            'image numbers, historical figures, or any source references. '
+            'Every field must be filled; write "Standard notation" if no special constraints apply.\n\n'
+            f'Content:\n{raw_text[:4000]}'
+        )
+
+    def style_examples_prompt(self, raw_text: str) -> str:
+        return (
+            f'Below is text extracted from a {self._subject} textbook or worksheet.\n'
+            'Find 4 to 6 ACTUAL EXERCISE PROBLEMS from the text \u2014 problems students are asked to solve. '
+            'Select problems that show VARIETY across the different sections. '
+            'Prioritise problems from later sections over the opening introductory examples.\n\n'
+            'Return ONLY a numbered list of the problems, copied VERBATIM from the source. '
+            'Do NOT rewrite, summarise, or add any explanation. '
+            'If the text contains no exercise problems, return exactly the word: NONE\n\n'
+            f'Text:\n{raw_text[:6000]}'
+        )
+
+    def generate_prompt(
+        self, topic: str, difficulty: str, guidance: str, num_questions: int
+    ) -> str:
+        return (
+            f'You are an experienced {self._subject} teacher creating a printed practice worksheet.\n\n'
+            f'Content and style reference:\n{topic}\n\n'
+            f'If the content above includes a "\u2500\u2500 Sample problems from source \u2500\u2500" section, '
+            f'generate questions that CLOSELY MATCH the style, real-world contexts, and problem '
+            f'types shown in those samples \u2014 same structural patterns and variety, but with '
+            f'different numbers and scenarios. Cover the FULL RANGE of problem types shown.\n\n'
+            f'Difficulty: {difficulty} \u2014 {guidance}\n\n'
+            f'Generate exactly {num_questions} distinct {self._subject} problems.\n\n'
+            f'CRITICAL RULES:\n'
+            f'1. Every question must be 100% self-contained in its text. '
+            f'Do NOT reference "the image", "the figure", "the graph shown", "the diagram", '
+            f'"the table above", "the textbook", or any external visual material.\n'
+            f'2. Students will receive a plain printed sheet. Use plain-text notation.\n\n'
+            f'IMPORTANT: Return ONLY a valid JSON array \u2014 no markdown, no code fences, '
+            f'no explanatory text before or after.\n\n'
+            f'Each object in the array must have exactly these keys:\n'
+            f'  "question"       \u2014 the problem statement.\n'
+            f'  "solution_steps" \u2014 a JSON array of strings, one string per step (minimum 2 steps).\n'
+            f'  "final_answer"   \u2014 the concise final answer only.\n'
+            f'  "needs_grid"     \u2014 false.\n'
+        )
+
+
+_MATH_HANDLER = _MathHandler()
+
+
+def _get_handler(subject: str) -> _SubjectHandler:
+    """Return the prompt handler for *subject*, falling back to a generic stub."""
+    if subject == 'Mathematics':
+        return _MATH_HANDLER
+    return _GenericHandler(subject)
+
+
+# ---------------------------------------------------------------------------
+
 class AIService:
     def __init__(self, config_manager: 'ConfigManager'):
         self._config = config_manager
@@ -78,30 +261,16 @@ class AIService:
         )
         return response.choices[0].message.content.strip()
 
-    async def summarize_topic(self, raw_text: str) -> str:
-        """Summarize raw math content (from images or PDFs) into a worksheet topic description.
+    async def summarize_topic(self, raw_text: str, subject: str = 'Mathematics') -> str:
+        """Summarize raw content into a worksheet topic description.
 
-        This is the shared final step for both image and PDF analysis paths.
+        Dispatches to the per-subject prompt handler.  This is the shared
+        final step for both image and PDF analysis paths.
         """
         model = self._config.get('text_model', 'llama-3.3-70b-versatile')
-        logger.info('Summarizing topic with text model: %s', model)
+        logger.info('Summarizing topic | subject=%s | model=%s', subject, model)
 
-        prompt = (
-            'You are helping generate a standalone math practice worksheet. '
-            'Below is content extracted from a math resource. '
-            'Identify the mathematical SKILLS and PROBLEM TYPES that students would actually practise — '
-            'ignore historical context, biographies, introductory theory, and any non-problem text. '
-            'Fill in EXACTLY this template — no extra text before or after, no markdown, no bullet symbols:\n\n'
-            'Topic: <specific math topic, e.g. "Cartesian coordinate system — plotting and reading points">\n'
-            'Grade level: <approximate grade, e.g. "Grade 9">\n'
-            'Problem types: <comma-separated list of practice problem types, e.g. "plotting points, reading coordinates, finding distances">\n'
-            'Notation/constraints: <specific notation or constraints, e.g. "integer coordinates, all four quadrants">\n\n'
-            'RULES: '
-            'Do NOT mention textbook names, book titles, chapter numbers, page numbers, '
-            'image numbers, historical figures, or any source references. '
-            'Every field must be filled; write "Standard notation" if no special constraints apply.\n\n'
-            f'Content:\n{raw_text[:4000]}'
-        )
+        prompt = _get_handler(subject).summarize_prompt(raw_text)
 
         client = self._client()
         response = await client.chat.completions.create(
@@ -113,28 +282,17 @@ class AIService:
         )
         return response.choices[0].message.content.strip()
 
-    async def extract_style_examples(self, raw_text: str) -> str:
-        """Scan raw extracted content and return 4-6 representative exercise problems verbatim.
+    async def extract_style_examples(self, raw_text: str, subject: str = 'Mathematics') -> str:
+        """Return 4-6 representative exercise problems verbatim from the raw content.
 
-        These are fed back into generate_questions as few-shot style examples so the AI
-        matches the source material's problem types and real-world contexts.
+        Dispatches to the per-subject prompt handler.  The results are passed
+        back into generate_questions as few-shot style examples.
         Returns an empty string when no exercise problems are found.
         """
         model = self._config.get('text_model', 'llama-3.3-70b-versatile')
-        logger.info('Extracting style examples with text model: %s', model)
+        logger.info('Extracting style examples | subject=%s | model=%s', subject, model)
 
-        prompt = (
-            'Below is text extracted from a math textbook or worksheet.\n'
-            'Find 4 to 6 ACTUAL EXERCISE PROBLEMS from the text — problems students are asked to solve. '
-            'Select problems that show VARIETY across the different sections: '
-            'include word problems, computational problems, pattern/sequence problems, '
-            'and table/graph problems if present. Prioritise problems from later sections over '
-            'the opening introductory examples.\n\n'
-            'Return ONLY a numbered list of the problems, copied VERBATIM from the source. '
-            'Do NOT rewrite, summarise, or add any explanation. '
-            'If the text contains no exercise problems, return exactly the word: NONE\n\n'
-            f'Text:\n{raw_text[:6000]}'
-        )
+        prompt = _get_handler(subject).style_examples_prompt(raw_text)
 
         client = self._client()
         response = await client.chat.completions.create(
@@ -148,61 +306,17 @@ class AIService:
         return '' if result.upper() == 'NONE' else result
 
     async def generate_questions(
-        self, topic: str, difficulty: str, num_questions: int
+        self, topic: str, difficulty: str, num_questions: int, subject: str = 'Mathematics'
     ) -> list:
         """Generate worksheet questions with full solutions. Returns list of dicts."""
         guidance = _DIFFICULTY_GUIDANCE.get(difficulty, _DIFFICULTY_GUIDANCE['Intermediate'])
         model = self._config.get('text_model', 'llama-3.3-70b-versatile')
         logger.info(
-            'Generating %d questions | difficulty=%s | model=%s',
-            num_questions, difficulty, model,
+            'Generating %d questions | subject=%s | difficulty=%s | model=%s',
+            num_questions, subject, difficulty, model,
         )
 
-        prompt = (
-            f'You are an experienced math teacher creating a printed practice worksheet.\n\n'
-            f'Content and style reference:\n{topic}\n\n'
-            f'If the content above includes a "── Sample problems from source ──" section, '
-            f'generate questions that CLOSELY MATCH the style, real-world contexts, and problem '
-            f'types shown in those samples — same structural patterns and variety, but with '
-            f'different numbers and scenarios. Cover the FULL RANGE of problem types shown, '
-            f'not just the simplest ones.\n\n'
-            f'Difficulty: {difficulty} — {guidance}\n\n'
-            f'Generate exactly {num_questions} distinct math problems.\n\n'
-            f'CRITICAL RULES:\n'
-            f'1. Every question must be 100% self-contained in its text. '
-            f'Do NOT reference "the image", "the figure", "the graph shown", "the diagram", '
-            f'"the table above", "the textbook", or any external visual material.\n'
-            f'2. Students will receive a plain printed sheet. '
-            f'If a problem involves a coordinate plane, describe all points and coordinates '
-            f'directly in the question text (e.g. "Plot the points A(2,3), B(-1,4) and find..."). '
-            f'A blank coordinate grid will be printed below questions that need one.\n'
-            f'3. Use plain-text math notation (e.g. x^2 + 3x - 4 = 0, not LaTeX).\n\n'
-            f'IMPORTANT: Return ONLY a valid JSON array — no markdown, no code fences, '
-            f'no explanatory text before or after.\n\n'
-            f'Each object in the array must have exactly these keys:\n'
-            f'  "question"       — the problem statement following the rules above.\n'
-            f'  "solution_steps" — a JSON array of strings, one string per step (minimum 2 steps).\n'
-            f'  "final_answer"   — the concise final answer only (e.g. "x = 4" or "42").\n'
-            f'  "needs_grid"     — true if the student must plot points or draw on a coordinate plane '
-            f'to solve the problem, false for all other questions.\n\n'
-            f'Example of correct format:\n'
-            f'[\n'
-            f'  {{\n'
-            f'    "question": "Solve: 2x + 4 = 12",\n'
-            f'    "solution_steps": ["Subtract 4 from both sides: 2x = 8", "Divide both sides by 2: x = 4"],\n'
-            f'    "final_answer": "x = 4",\n'
-            f'    "needs_grid": false\n'
-            f'  }},\n'
-            f'  {{\n'
-            f'    "question": "Plot the points A(2, 3) and B(-1, 4) on the coordinate plane. '
-            f'Find the length of segment AB.",\n'
-            f'    "solution_steps": ["Mark A(2,3) and B(-1,4) on the grid", '
-            f'"Apply distance formula: d = sqrt((2-(-1))^2 + (3-4)^2) = sqrt(9+1) = sqrt(10)"],\n'
-            f'    "final_answer": "sqrt(10) approx 3.16",\n'
-            f'    "needs_grid": true\n'
-            f'  }}\n'
-            f']'
-        )
+        prompt = _get_handler(subject).generate_prompt(topic, difficulty, guidance, num_questions)
 
         client = self._client()
         response = await client.chat.completions.create(

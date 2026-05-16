@@ -37,6 +37,7 @@ class MainWindow(QMainWindow):
         self._pdf_worker: PDFAnalysisWorker | None = None
         self._worksheet_worker: WorksheetWorker | None = None
         self._progress: ProgressDialog | None = None
+        self._current_subject: str = ''
         self._setup_ui()
 
     # ------------------------------------------------------------------
@@ -44,7 +45,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _setup_ui(self):
-        self.setWindowTitle('Math Worksheet Generator')
+        self.setWindowTitle('Worksheet Generator')
         self.setMinimumSize(840, 580)
         self.resize(980, 660)
 
@@ -63,6 +64,7 @@ class MainWindow(QMainWindow):
         self._image_panel = ImagePanel(self._config)
         self._image_panel.images_changed.connect(self._on_images_list_changed)
         self._image_panel.analyze_requested.connect(self._on_analyze_requested)
+        self._image_panel.subject_changed.connect(self._on_subject_changed)
 
         self._options_panel = OptionsPanel(self._config)
 
@@ -102,9 +104,7 @@ class MainWindow(QMainWindow):
         # Status bar
         self._status = QStatusBar()
         self.setStatusBar(self._status)
-        self._status.showMessage(
-            'Ready.  Upload an image or type a topic description to get started.'
-        )
+        self._status.showMessage('Select a subject to get started.')
 
     def _build_menu(self):
         bar = QMenuBar(self)
@@ -130,6 +130,20 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self):
         SettingsDialog(self._config, parent=self).exec()
+
+    def _on_subject_changed(self, subject: str):
+        """Called when the user changes the subject combo in the image panel."""
+        self._current_subject = subject
+        self._cancel_analysis_workers()
+        self._options_panel.set_topic('')
+        self._options_panel.reset_approval()
+        self._generate_btn.setEnabled(False)
+        if subject:
+            self._status.showMessage(
+                f'Subject: {subject}.  Upload files then click Analyze Files.'
+            )
+        else:
+            self._status.showMessage('Select a subject to get started.')
 
     def _on_images_list_changed(self, paths: list):
         """React to images being added or removed (no AI call — just reset state when empty)."""
@@ -180,14 +194,14 @@ class MainWindow(QMainWindow):
         if pdfs:
             n = len(pdfs)
             self._status.showMessage(f'Extracting and analyzing {n} PDF{"s" if n > 1 else ""}...')
-            self._pdf_worker = PDFAnalysisWorker(self._ai, pdfs, self._config)
+            self._pdf_worker = PDFAnalysisWorker(self._ai, pdfs, self._config, self._current_subject)
             self._pdf_worker.finished.connect(self._on_analysis_done)
             self._pdf_worker.error.connect(self._on_analysis_error)
             self._pdf_worker.start()
         else:
             n = len(images)
             self._status.showMessage(f'Analyzing {n} image{"s" if n > 1 else ""}...')
-            self._analysis_worker = ImageAnalysisWorker(self._ai, images)
+            self._analysis_worker = ImageAnalysisWorker(self._ai, images, self._current_subject)
             self._analysis_worker.finished.connect(self._on_analysis_done)
             self._analysis_worker.error.connect(self._on_analysis_error)
             self._analysis_worker.start()
@@ -237,7 +251,7 @@ class MainWindow(QMainWindow):
 
         self._worksheet_worker = WorksheetWorker(
             self._ai, self._config,
-            topic, difficulty, num_questions, output_dir,
+            topic, difficulty, num_questions, output_dir, self._current_subject,
         )
         self._worksheet_worker.step_updated.connect(self._progress.set_step)
         self._worksheet_worker.finished.connect(self._on_generation_done)

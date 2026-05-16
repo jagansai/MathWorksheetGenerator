@@ -7,5 +7,6 @@
   "max_image_size_mb": 8,
   "max_pdf_size_mb": 25,
   "max_files": 10,
-  "max_pdf_pages": 50
+  "max_pdf_pages": 50,
+  "subjects" : ["Mathematics", "Physics", "Chemistry", "Biology"]
 }

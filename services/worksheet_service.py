@@ -26,10 +26,11 @@ class ImageAnalysisWorker(QThread):
     finished = pyqtSignal(str)   # topic description
     error = pyqtSignal(str)      # error message
 
-    def __init__(self, ai_service: AIService, image_paths: list[str]):
+    def __init__(self, ai_service: AIService, image_paths: list[str], subject: str = 'Mathematics'):
         super().__init__()
         self._ai = ai_service
         self._image_paths = image_paths
+        self._subject = subject
 
     def run(self):
         try:
@@ -42,8 +43,8 @@ class ImageAnalysisWorker(QThread):
     async def _analyze(self) -> str:
         raw = await self._ai.extract_from_images(self._image_paths)
         topic, examples = await asyncio.gather(
-            self._ai.summarize_topic(raw),
-            self._ai.extract_style_examples(raw),
+            self._ai.summarize_topic(raw, self._subject),
+            self._ai.extract_style_examples(raw, self._subject),
         )
         return _combine_content(topic, examples)
 
@@ -54,11 +55,12 @@ class PDFAnalysisWorker(QThread):
     finished = pyqtSignal(str)   # topic description
     error = pyqtSignal(str)      # error message
 
-    def __init__(self, ai_service: AIService, pdf_paths: list[str], config_manager: 'ConfigManager'):
+    def __init__(self, ai_service: AIService, pdf_paths: list[str], config_manager: 'ConfigManager', subject: str = 'Mathematics'):
         super().__init__()
         self._ai = ai_service
         self._pdf_paths = pdf_paths
         self._config = config_manager
+        self._subject = subject
 
     def run(self):
         try:
@@ -79,8 +81,8 @@ class PDFAnalysisWorker(QThread):
                 'Try uploading a scanned image instead.'
             )
         topic, examples = await asyncio.gather(
-            self._ai.summarize_topic(combined),
-            self._ai.extract_style_examples(combined),
+            self._ai.summarize_topic(combined, self._subject),
+            self._ai.extract_style_examples(combined, self._subject),
         )
         return _combine_content(topic, examples)
 
@@ -100,6 +102,7 @@ class WorksheetWorker(QThread):
         difficulty: str,
         num_questions: int,
         output_dir: str,
+        subject: str = 'Mathematics',
     ):
         super().__init__()
         self._ai = ai_service
@@ -108,6 +111,7 @@ class WorksheetWorker(QThread):
         self._difficulty = difficulty
         self._num_questions = num_questions
         self._output_dir = output_dir
+        self._subject = subject
 
     def run(self):
         try:
@@ -121,7 +125,7 @@ class WorksheetWorker(QThread):
             f'Asking AI to generate {self._num_questions} questions ({self._difficulty})...'
         )
         questions = await self._ai.generate_questions(
-            self._topic, self._difficulty, self._num_questions
+            self._topic, self._difficulty, self._num_questions, self._subject
         )
         logger.info('Received %d questions from AI', len(questions))
 

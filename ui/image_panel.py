@@ -5,6 +5,7 @@ from io import BytesIO
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QPixmap
 from PyQt6.QtWidgets import (
+    QComboBox,
     QDialog,
     QFileDialog,
     QFrame,
@@ -44,6 +45,15 @@ _STYLE_HOVER = """
         border-radius: 8px;
         background: #eef4ff;
         color: #4a90d9;
+        font-size: 13px;
+    }
+"""
+_STYLE_DISABLED = """
+    QLabel {
+        border: 2px dashed #cccccc;
+        border-radius: 8px;
+        background: #f2f2f2;
+        color: #bbbbbb;
         font-size: 13px;
     }
 """
@@ -280,6 +290,7 @@ class ImagePanel(QWidget):
 
     images_changed    = pyqtSignal(list)
     analyze_requested = pyqtSignal(list)
+    subject_changed   = pyqtSignal(str)
 
     # Legacy signals kept for compatibility
     image_loaded  = pyqtSignal(str)
@@ -299,11 +310,23 @@ class ImagePanel(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        self._drop_label = QLabel("Drop images or PDFs here\n\nor click  Add Files")
+        # ---- Subject selector ----
+        subj_row = QHBoxLayout()
+        subj_row.setSpacing(6)
+        subj_row.addWidget(QLabel('Subject:'))
+        self.subject_combo = QComboBox()
+        self.subject_combo.addItem('\u2014 Select a subject \u2014')
+        for s in (self._config.get('subjects') or ['Mathematics']):
+            self.subject_combo.addItem(s)
+        self.subject_combo.currentIndexChanged.connect(self._on_subject_changed)
+        subj_row.addWidget(self.subject_combo)
+        subj_row.addStretch()
+
+        self._drop_label = QLabel('Select a subject above\nbefore uploading files')
         self._drop_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._drop_label.setWordWrap(True)
         self._drop_label.setMinimumHeight(160)
-        self._drop_label.setStyleSheet(_STYLE_IDLE)
+        self._drop_label.setStyleSheet(_STYLE_DISABLED)
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
@@ -333,6 +356,7 @@ class ImagePanel(QWidget):
         btn_row.setSpacing(6)
 
         self._browse_btn = QPushButton("Add Files...")
+        self._browse_btn.setEnabled(False)
         self._browse_btn.clicked.connect(self._browse)
 
         self._analyze_btn = QPushButton("Analyze Files")
@@ -356,6 +380,7 @@ class ImagePanel(QWidget):
         self._clear_all_btn.clicked.connect(self._clear_all)
         self._clear_all_btn.hide()
 
+        layout.addLayout(subj_row)
         layout.addWidget(self._drop_label)
         layout.addWidget(self._scroll)
         layout.addWidget(self._reorder_hint)
@@ -398,7 +423,37 @@ class ImagePanel(QWidget):
         for path in paths:
             self._add_image(path)
 
+    def get_subject(self) -> str:
+        """Return the selected subject name, or '' when no subject is selected."""
+        return (
+            ''
+            if self.subject_combo.currentIndex() == 0
+            else self.subject_combo.currentText()
+        )
+
+    def _set_upload_enabled(self, enabled: bool):
+        """Enable or disable upload controls based on whether a subject is selected."""
+        self._browse_btn.setEnabled(enabled)
+        if enabled and self._image_paths:
+            self._analyze_btn.setEnabled(True)
+        elif not enabled and self._analyze_btn.isVisible():
+            self._analyze_btn.setEnabled(False)
+        # Only update the drop-zone appearance when no files are currently loaded
+        if not self._image_paths:
+            if enabled:
+                self._drop_label.setText('Drop images or PDFs here\n\nor click  Add Files')
+                self._drop_label.setStyleSheet(_STYLE_IDLE)
+            else:
+                self._drop_label.setText('Select a subject above\nbefore uploading files')
+                self._drop_label.setStyleSheet(_STYLE_DISABLED)
+
+    def _on_subject_changed(self, index: int):
+        self._set_upload_enabled(index > 0)
+        self.subject_changed.emit(self.get_subject())
+
     def _add_image(self, path: str):
+        if self.subject_combo.currentIndex() == 0:  # no subject selected
+            return
         ext = os.path.splitext(path)[1].lower()
         if ext not in _ACCEPTED:
             return
@@ -532,6 +587,8 @@ class ImagePanel(QWidget):
     # ------------------------------------------------------------------
 
     def dragEnterEvent(self, event: QDragEnterEvent):  # type: ignore[override]
+        if self.subject_combo.currentIndex() == 0:
+            return
         if event.mimeData().hasUrls():
             accepted = any(
                 os.path.splitext(u.toLocalFile())[1].lower() in _ACCEPTED
@@ -542,9 +599,14 @@ class ImagePanel(QWidget):
                 self._drop_label.setStyleSheet(_STYLE_HOVER)
 
     def dragLeaveEvent(self, event):  # type: ignore[override]
-        self._drop_label.setStyleSheet(_STYLE_IDLE)
+        if self.subject_combo.currentIndex() > 0:
+            self._drop_label.setStyleSheet(_STYLE_IDLE)
+        else:
+            self._drop_label.setStyleSheet(_STYLE_DISABLED)
 
     def dropEvent(self, event: QDropEvent):  # type: ignore[override]
+        if self.subject_combo.currentIndex() == 0:
+            return
         self._drop_label.setStyleSheet(_STYLE_IDLE)
         urls = event.mimeData().urls()
         if urls:
