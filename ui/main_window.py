@@ -21,6 +21,7 @@ from services.ai_service import AIService
 from services.worksheet_service import ImageAnalysisWorker, PDFAnalysisWorker, WorksheetWorker
 from ui.image_panel import ImagePanel
 from ui.options_panel import OptionsPanel
+from ui.page_range_dialog import PageRangeDialog
 from ui.progress_dialog import ProgressDialog
 from ui.settings_dialog import SettingsDialog
 from utils.logger import setup_logger
@@ -194,7 +195,15 @@ class MainWindow(QMainWindow):
         if pdfs:
             n = len(pdfs)
             self._status.showMessage(f'Extracting and analyzing {n} PDF{"s" if n > 1 else ""}...')
-            self._pdf_worker = PDFAnalysisWorker(self._ai, pdfs, self._config, self._current_subject)
+            page_ranges = self._collect_page_ranges(pdfs)
+            if page_ranges is None:   # user cancelled at least one dialog
+                self._image_panel.set_analyzing(False)
+                self._status.showMessage('Analysis cancelled.')
+                return
+            self._pdf_worker = PDFAnalysisWorker(
+                self._ai, pdfs, self._config, self._current_subject,
+                page_ranges=page_ranges,
+            )
             self._pdf_worker.finished.connect(self._on_analysis_done)
             self._pdf_worker.error.connect(self._on_analysis_error)
             self._pdf_worker.start()
@@ -205,6 +214,30 @@ class MainWindow(QMainWindow):
             self._analysis_worker.finished.connect(self._on_analysis_done)
             self._analysis_worker.error.connect(self._on_analysis_error)
             self._analysis_worker.start()
+
+    def _collect_page_ranges(self, pdf_paths: list[str]) -> dict[str, tuple[int, int]] | None:
+        """For each PDF that exceeds max_pdf_pages, show a PageRangeDialog.
+
+        Returns a dict mapping path → (start, end) for every oversized PDF,
+        with un-constrained PDFs absent from the dict (worker uses full range).
+        Returns None if the user cancelled any dialog.
+        """
+        from utils.pdf_reader import get_page_count
+        max_pages = int(self._config.get('max_pdf_pages') or 50)
+        ranges: dict[str, tuple[int, int]] = {}
+        for path in pdf_paths:
+            try:
+                total = get_page_count(path)
+            except Exception:
+                continue   # let the worker surface any real read error
+            if total > max_pages:
+                dlg = PageRangeDialog(
+                    os.path.basename(path), total, max_pages, parent=self
+                )
+                if dlg.exec() != PageRangeDialog.DialogCode.Accepted:
+                    return None
+                ranges[path] = (dlg.start_page, dlg.end_page)
+        return ranges
 
     def _on_analysis_done(self, topic: str):
         self._image_panel.set_analyzing(False)

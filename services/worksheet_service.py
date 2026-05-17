@@ -56,12 +56,20 @@ class PDFAnalysisWorker(QThread):
     finished = pyqtSignal(str)   # topic description
     error = pyqtSignal(str)      # error message
 
-    def __init__(self, ai_service: AIService, pdf_paths: list[str], config_manager: 'ConfigManager', subject: str = 'Mathematics'):
+    def __init__(
+        self,
+        ai_service: AIService,
+        pdf_paths: list[str],
+        config_manager: 'ConfigManager',
+        subject: str = 'Mathematics',
+        page_ranges: dict[str, tuple[int, int]] | None = None,
+    ):
         super().__init__()
         self._ai = ai_service
         self._pdf_paths = pdf_paths
         self._config = config_manager
         self._subject = subject
+        self._page_ranges: dict[str, tuple[int, int]] = page_ranges or {}
 
     def run(self):
         try:
@@ -73,8 +81,11 @@ class PDFAnalysisWorker(QThread):
 
     async def _analyze(self) -> str:
         from utils.pdf_reader import extract_text
-        max_pages = int(self._config.get('max_pdf_pages') or 50)
-        texts = [extract_text(p, max_pages=max_pages) for p in self._pdf_paths]
+        texts = []
+        for p in self._pdf_paths:
+            r = self._page_ranges.get(p)
+            start, end = (r[0], r[1]) if r else (1, None)
+            texts.append(extract_text(p, start_page=start, end_page=end))
         combined = '\n\n'.join(t for t in texts if t)
         if not combined.strip():
             raise ValueError(

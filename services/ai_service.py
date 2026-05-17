@@ -8,6 +8,7 @@ from openai import AsyncOpenAI
 
 from services.base_handler import QuestionType, _SubjectHandler
 from services.math_handler import _MATH_HANDLER
+from services.chemistry_handler import _CHEMISTRY_HANDLER
 from utils.logger import setup_logger
 
 if TYPE_CHECKING:
@@ -128,6 +129,8 @@ def _get_handler(subject: str) -> _SubjectHandler:
     """Return the prompt handler for *subject*, falling back to a generic stub."""
     if subject == 'Mathematics':
         return _MATH_HANDLER
+    if subject == 'Chemistry':
+        return _CHEMISTRY_HANDLER
     return _GenericHandler(subject)
 
 
