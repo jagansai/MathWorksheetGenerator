@@ -352,6 +352,21 @@ class ImagePanel(QWidget):
         self._status_label.setStyleSheet("color: #555; font-size: 10px;")
         self._status_label.hide()
 
+        self._exercise_tip_label = QLabel(
+            "<span style='font-size:12px; color:#e65100; font-weight:bold;'>Tip:</span>"
+            "<span style='font-size:12px; color:#4a148c;'> Include at least one image that shows"
+            " exercise or practice questions — this helps the app identify the question pattern"
+            " more accurately.</span>"
+        )
+        self._exercise_tip_label.setTextFormat(Qt.TextFormat.RichText)
+        self._exercise_tip_label.setWordWrap(True)
+        self._exercise_tip_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self._exercise_tip_label.setStyleSheet(
+            "QLabel { background: #fff8e1; border: 1px solid #ffe082; border-radius: 5px;"
+            " padding: 7px 10px; }"
+        )
+        self._exercise_tip_label.hide()
+
         btn_row = QHBoxLayout()
         btn_row.setSpacing(6)
 
@@ -385,6 +400,7 @@ class ImagePanel(QWidget):
         layout.addWidget(self._scroll)
         layout.addWidget(self._reorder_hint)
         layout.addWidget(self._status_label)
+        layout.addWidget(self._exercise_tip_label)
         layout.addLayout(btn_row)
         layout.addWidget(self._clear_all_btn)
 
@@ -446,6 +462,10 @@ class ImagePanel(QWidget):
             else:
                 self._drop_label.setText('Select a subject above\nbefore uploading files')
                 self._drop_label.setStyleSheet(_STYLE_DISABLED)
+        if enabled:
+            self._exercise_tip_label.show()
+        else:
+            self._exercise_tip_label.hide()
 
     def _on_subject_changed(self, index: int):
         self._set_upload_enabled(index > 0)

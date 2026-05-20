@@ -8,7 +8,8 @@
 [CmdletBinding()]
 param(
     [switch]$Clean,
-    [switch]$OneFile
+    [switch]$OneFile,
+    [switch]$Force   # skip the "no updates" short-circuit
 )
 
 $AppName    = 'MathWorksheetGenerator'
@@ -24,20 +25,44 @@ function Write-OK($msg)   { Write-Host "   OK  $msg" -ForegroundColor Green }
 function Write-Fail($msg) { Write-Host "   ERR $msg" -ForegroundColor Red; Pop-Location; exit 1 }
 
 # ---------------------------------------------------------------------------
-# 0. Git: pull latest if working tree is clean
+# 0. Git: check for updates; short-circuit when nothing has changed
 # ---------------------------------------------------------------------------
-Write-Step 'Checking for local changes'
+Write-Step 'Checking for updates'
 $gitStatus = git status --porcelain 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Host '   Not a git repo or git not found — skipping pull.' -ForegroundColor Yellow
-} elseif ([string]::IsNullOrWhiteSpace($gitStatus)) {
-    Write-OK 'Working tree clean — pulling latest from develop.'
-    git pull origin develop
-    if ($LASTEXITCODE -ne 0) { Write-Fail 'git pull failed.' }
-    Write-OK 'Pull complete.'
-} else {
-    Write-Host '   Local changes detected — skipping pull, building from current state.' -ForegroundColor Yellow
+$isGitRepo = ($LASTEXITCODE -eq 0)
+
+if (-not $isGitRepo) {
+    Write-Host '   Not a git repo or git not found — skipping update check.' -ForegroundColor Yellow
+} elseif (-not [string]::IsNullOrWhiteSpace($gitStatus)) {
+    # Local uncommitted changes — always build
+    Write-Host '   Local changes detected — building from current state.' -ForegroundColor Yellow
     Write-Host ($gitStatus -split "`n" | ForEach-Object { "      $_" } | Out-String).TrimEnd()
+} else {
+    # Clean working tree: compare local HEAD with remote before pulling
+    $headBefore = (git rev-parse HEAD 2>&1).Trim()
+    Write-Host "   Current HEAD : $headBefore" -ForegroundColor Gray
+
+    Write-Host '   Fetching from origin/develop...' -ForegroundColor Cyan
+    git fetch origin develop 2>&1 | Out-Null
+
+    $headRemote = (git rev-parse origin/develop 2>&1).Trim()
+    Write-Host "   Remote HEAD  : $headRemote" -ForegroundColor Gray
+
+    if ($headBefore -eq $headRemote) {
+        if (-not $Force) {
+            Write-Host "`n   No updates found on origin/develop — build skipped." -ForegroundColor Yellow
+            Write-Host "   Run with -Force to build anyway.`n" -ForegroundColor Yellow
+            Pop-Location
+            exit 0
+        } else {
+            Write-Host '   No updates found, but -Force specified — continuing build.' -ForegroundColor Yellow
+        }
+    } else {
+        Write-OK 'Updates available — pulling latest from develop.'
+        git pull origin develop
+        if ($LASTEXITCODE -ne 0) { Write-Fail 'git pull failed.' }
+        Write-OK 'Pull complete.'
+    }
 }
 
 # ---------------------------------------------------------------------------
