@@ -116,6 +116,7 @@ class WorksheetWorker(QThread):
         output_dir: str,
         subject: str = 'Mathematics',
         question_types: list[QuestionType] | None = None,
+        grade: str = '',
     ):
         super().__init__()
         self._ai = ai_service
@@ -126,6 +127,7 @@ class WorksheetWorker(QThread):
         self._output_dir = output_dir
         self._subject = subject
         self._question_types = question_types or [QuestionType.NON_WORD]
+        self._grade = grade
 
     def run(self):
         try:
@@ -139,7 +141,8 @@ class WorksheetWorker(QThread):
             f'Asking AI to generate {self._num_questions} questions ({self._difficulty})...'
         )
         questions = await self._ai.generate_questions(
-            self._topic, self._difficulty, self._num_questions, self._subject, self._question_types
+            self._topic, self._difficulty, self._num_questions, self._subject, self._question_types,
+            self._grade,
         )
         logger.info('Received %d questions from AI', len(questions))
 
@@ -147,7 +150,7 @@ class WorksheetWorker(QThread):
         # Strip the sample-problems block (style reference only — not for the PDF title)
         topic_for_pdf = self._topic.split('\n\n\u2500\u2500 Sample problems from source \u2500\u2500')[0].strip()
         student_path, teacher_path = generate_pdfs(
-            questions, topic_for_pdf, self._output_dir
+            questions, topic_for_pdf, self._output_dir, self._subject
         )
 
         self.finished.emit(student_path, teacher_path)

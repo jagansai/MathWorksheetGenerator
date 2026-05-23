@@ -21,6 +21,17 @@ _GRID_RANGE = 6                          # axis runs from -6 to +6
 _GRID_CELL  = 7.5                        # mm per unit
 _GRID_SIZE  = 2 * _GRID_RANGE * _GRID_CELL   # 90 mm total
 
+# Blank diagram box constants
+_DIAGRAM_BOX_H = 55                      # mm — height of blank drawing area
+
+# Per-subject worksheet titles
+_SUBJECT_TITLE: dict[str, str] = {
+    'Mathematics': 'Mathematics Worksheet',
+    'Physics':     'Physics Worksheet',
+    'Chemistry':   'Chemistry Worksheet',
+    'Biology':     'Biology Worksheet',
+}
+
 
 # ---------------------------------------------------------------------------
 # Text sanitisation — Helvetica is Latin-1; replace common math unicode
@@ -153,6 +164,59 @@ def _draw_coordinate_grid(pdf: FPDF):
     pdf.set_xy(MARGIN, y0 + _GRID_SIZE + 8)
 
 
+def _draw_diagram_space(pdf: FPDF, label: str = 'Draw your diagram here'):
+    """Draw a labelled blank box for student diagram work (free body diagram, geometric construction, etc.)."""
+    needed = _DIAGRAM_BOX_H + 14
+    if pdf.get_y() + needed > pdf.h - MARGIN:
+        pdf.add_page()
+
+    y0 = pdf.get_y() + 4
+
+    # Dashed border rectangle
+    pdf.set_draw_color(160, 160, 160)
+    pdf.set_line_width(0.4)
+    pdf.set_dash_pattern(dash=2, gap=2)
+    pdf.rect(MARGIN, y0, CONTENT_W, _DIAGRAM_BOX_H)
+    pdf.set_dash_pattern()
+
+    # Caption label centred below the box
+    pdf.set_font('Helvetica', 'I', 8)
+    pdf.set_text_color(130, 130, 130)
+    pdf.set_xy(MARGIN, y0 + _DIAGRAM_BOX_H + 2)
+    pdf.cell(CONTENT_W, 5, _sanitize(label), align='C', new_x='LMARGIN', new_y='NEXT')
+
+    # Reset drawing state and advance cursor
+    pdf.set_line_width(0.2)
+    pdf.set_draw_color(0, 0, 0)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(2)
+
+
+def _embed_figure(pdf: FPDF, figure: dict) -> None:
+    """Render *figure* with matplotlib and embed the PNG into the PDF."""  # noqa: E501
+    from utils.figure_renderer import render_figure, _FIG_H, _FIG_W, _NL_H, _NL_W
+    tmp = render_figure(figure)
+    if tmp is None:
+        return
+    try:
+        shape = figure.get('shape') or figure.get('type', '')
+        # Aspect ratio from matplotlib figsize constants
+        h_ratio = _NL_H / _NL_W if shape == 'number_line' else _FIG_H / _FIG_W
+        fig_w = CONTENT_W * 0.62             # ~105 mm, centred on content
+        fig_h = fig_w * h_ratio
+        x = MARGIN + (CONTENT_W - fig_w) / 2
+        if pdf.get_y() + fig_h + 8 > pdf.h - MARGIN:
+            pdf.add_page()
+        y_start = pdf.get_y()
+        pdf.image(tmp, x=x, y=y_start, w=fig_w)
+        pdf.set_xy(MARGIN, y_start + fig_h + 4)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
 # ---------------------------------------------------------------------------
 # MCQ rendering helpers
 # ---------------------------------------------------------------------------
@@ -218,13 +282,14 @@ class _BasePDF(FPDF):
 # ---------------------------------------------------------------------------
 # Student worksheet
 # ---------------------------------------------------------------------------
-def build_student_pdf(questions: list, topic: str, output_path: str):
-    pdf = _BasePDF('Math Worksheet')
+def build_student_pdf(questions: list, topic: str, output_path: str, subject: str = 'Mathematics'):
+    title = _SUBJECT_TITLE.get(subject, f'{subject} Worksheet')
+    pdf = _BasePDF(title)
     pdf.add_page()
 
     # --- Title block ---
     pdf.set_font('Helvetica', 'B', 20)
-    pdf.cell(0, 12, 'Math Worksheet', align='C', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 12, title, align='C', new_x='LMARGIN', new_y='NEXT')
 
     _render_topic_block(pdf, topic)
 
@@ -244,10 +309,20 @@ def build_student_pdf(questions: list, topic: str, output_path: str):
         pdf.multi_cell(0, LINE_H, _sanitize(f'Q{i}.  {q["question"]}'), align='L', new_x='LMARGIN')
         pdf.ln(1)
 
+        figure = q.get('figure')
         if q.get('type') == 'mcq':
             _render_mcq_choices_student(pdf, q.get('choices', []))
+        elif figure:
+            _embed_figure(pdf, figure)
         elif q.get('needs_grid'):
             _draw_coordinate_grid(pdf)
+        elif q.get('needs_diagram'):
+            _draw_diagram_space(pdf, q.get('diagram_label') or 'Draw your diagram here')
+            for _ in range(3):
+                y = pdf.get_y() + 6
+                pdf.set_draw_color(210, 210, 210)
+                pdf.line(MARGIN + 4, y, PAGE_W - MARGIN, y)
+                pdf.ln(8)
         else:
             # Blank working lines
             for _ in range(4):
@@ -264,8 +339,9 @@ def build_student_pdf(questions: list, topic: str, output_path: str):
 # ---------------------------------------------------------------------------
 # Teacher answer key
 # ---------------------------------------------------------------------------
-def build_teacher_pdf(questions: list, topic: str, output_path: str):
-    pdf = _BasePDF('TEACHER COPY - Answer Key')
+def build_teacher_pdf(questions: list, topic: str, output_path: str, subject: str = 'Mathematics'):
+    title = _SUBJECT_TITLE.get(subject, f'{subject} Worksheet')
+    pdf = _BasePDF(f'TEACHER COPY - {title} - Answer Key')
     pdf.add_page()
 
     # --- Title block ---
@@ -275,7 +351,7 @@ def build_teacher_pdf(questions: list, topic: str, output_path: str):
     pdf.set_text_color(0, 0, 0)
 
     pdf.set_font('Helvetica', 'B', 18)
-    pdf.cell(0, 11, 'Full Solutions', align='C', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 11, f'{title} - Full Solutions', align='C', new_x='LMARGIN', new_y='NEXT')
 
     _render_topic_block(pdf, topic)
 
@@ -291,10 +367,16 @@ def build_teacher_pdf(questions: list, topic: str, output_path: str):
         pdf.ln(1)
 
         # MCQ choices (teacher copy shows correct answer highlighted)
+        figure = q.get('figure')
         if q.get('type') == 'mcq':
             _render_mcq_choices_teacher(pdf, q.get('choices', []), q.get('correct_choice', ''))
+        elif figure:
+            _embed_figure(pdf, figure)
         elif q.get('needs_grid'):
             _draw_coordinate_grid(pdf)
+            pdf.ln(2)
+        elif q.get('needs_diagram'):
+            _draw_diagram_space(pdf, q.get('diagram_label') or 'Diagram space')
             pdf.ln(2)
 
         # Solution steps
@@ -339,7 +421,7 @@ def build_teacher_pdf(questions: list, topic: str, output_path: str):
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
-def generate_pdfs(questions: list, topic: str, output_dir: str) -> tuple:
+def generate_pdfs(questions: list, topic: str, output_dir: str, subject: str = 'Mathematics') -> tuple:
     """Generate both PDFs. Returns (student_path, teacher_path)."""
     os.makedirs(output_dir, exist_ok=True)
 
@@ -352,7 +434,7 @@ def generate_pdfs(questions: list, topic: str, output_dir: str) -> tuple:
     student_path = os.path.join(output_dir, f'worksheet_{safe_topic}_{date_tag}.pdf')
     teacher_path = os.path.join(output_dir, f'answers_{safe_topic}_{date_tag}.pdf')
 
-    build_student_pdf(questions, topic, student_path)
-    build_teacher_pdf(questions, topic, teacher_path)
+    build_student_pdf(questions, topic, student_path, subject)
+    build_teacher_pdf(questions, topic, teacher_path, subject)
 
     return student_path, teacher_path

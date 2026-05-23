@@ -2,13 +2,16 @@
 import asyncio
 import base64
 import json
+import re
 from typing import TYPE_CHECKING
 
+import openai
 from openai import AsyncOpenAI
 
 from services.base_handler import QuestionType, _SubjectHandler
 from services.math_handler import _MATH_HANDLER
 from services.chemistry_handler import _CHEMISTRY_HANDLER
+from services.physics_handler import _PHYSICS_HANDLER
 from utils.logger import setup_logger
 
 if TYPE_CHECKING:
@@ -99,8 +102,10 @@ class _GenericHandler(_SubjectHandler):
 
     def generate_prompt(
         self, topic: str, difficulty: str, guidance: str, num_questions: int,
-        question_types: list[QuestionType] | None = None,
+        question_types: list[QuestionType] | None = None, grade: str = '',
+        compact: bool = False,
     ) -> str:
+        grade_line = f'Grade level: {grade}\n' if grade else ''
         return (
             f'You are an experienced {self._subject} teacher creating a printed practice worksheet.\n\n'
             f'Content and style reference:\n{topic}\n\n'
@@ -108,7 +113,9 @@ class _GenericHandler(_SubjectHandler):
             f'generate questions that CLOSELY MATCH the style, real-world contexts, and problem '
             f'types shown in those samples \u2014 same structural patterns and variety, but with '
             f'different numbers and scenarios. Cover the FULL RANGE of problem types shown.\n\n'
-            f'Difficulty: {difficulty} \u2014 {guidance}\n\n'
+            f'Difficulty: {difficulty} \u2014 {guidance}\n'
+            f'{grade_line}'
+            f'\n'
             f'Generate exactly {num_questions} distinct {self._subject} problems.\n\n'
             f'CRITICAL RULES:\n'
             f'1. Every question must be 100% self-contained in its text. '
@@ -131,7 +138,41 @@ def _get_handler(subject: str) -> _SubjectHandler:
         return _MATH_HANDLER
     if subject == 'Chemistry':
         return _CHEMISTRY_HANDLER
+    if subject == 'Physics':
+        return _PHYSICS_HANDLER
     return _GenericHandler(subject)
+
+
+# Models where (prompt + max_tokens) must stay within a tight per-request token budget.
+# Value = max output tokens to request so that total stays under the model's TPM cap.
+_COMPACT_MODELS: dict[str, int] = {
+    'llama-3.1-8b-instant': 4000,
+    'gemma2-9b-it': 4000,
+}
+
+_RETRY_WAIT_RE = re.compile(r'try again in (\d+(?:\.\d+)?)s', re.IGNORECASE)
+_MAX_RETRIES = 3
+
+
+async def _with_retry(fn, **kwargs):
+    """Call ``fn(**kwargs)``, retrying up to _MAX_RETRIES times on HTTP 429.
+
+    Groq 429 responses include a "Please try again in X.Xs" hint; we parse
+    that and sleep accordingly before each retry.
+    """
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            return await fn(**kwargs)
+        except openai.RateLimitError as exc:
+            if attempt == _MAX_RETRIES:
+                raise
+            m = _RETRY_WAIT_RE.search(str(exc))
+            wait = float(m.group(1)) + 1.0 if m else 10.0
+            logger.warning(
+                'Rate limited (attempt %d/%d) — retrying in %.1fs…',
+                attempt + 1, _MAX_RETRIES, wait,
+            )
+            await asyncio.sleep(wait)
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +218,8 @@ class AIService:
         logger.info('Extracting content from %d image(s) with vision model: %s', len(image_paths), model)
 
         client = self._client()
-        response = await client.chat.completions.create(
+        response = await _with_retry(
+            client.chat.completions.create,
             model=model,
             messages=[{'role': 'user', 'content': content}],
             max_tokens=1024,
@@ -192,12 +234,17 @@ class AIService:
         final step for both image and PDF analysis paths.
         """
         model = self._config.get('text_model', 'llama-3.3-70b-versatile')
-        logger.info('Summarizing topic | subject=%s | model=%s', subject, model)
+        compact = model in _COMPACT_MODELS
+        logger.info('Summarizing topic | subject=%s | model=%s | compact=%s', subject, model, compact)
 
-        prompt = _get_handler(subject).summarize_prompt(raw_text)
+        # For compact models truncate the input before building the prompt so
+        # the summarize_prompt's own [:4000] slice still fits in the TPM budget.
+        text_for_prompt = raw_text[:2000] if compact else raw_text
+        prompt = _get_handler(subject).summarize_prompt(text_for_prompt)
 
         client = self._client()
-        response = await client.chat.completions.create(
+        response = await _with_retry(
+            client.chat.completions.create,
             model=model,
             messages=[{'role': 'user', 'content': prompt}],
             max_tokens=256,
@@ -220,19 +267,28 @@ class AIService:
         """
         handler = _get_handler(subject)
         model = self._config.get('text_model', 'llama-3.3-70b-versatile')
-        logger.info('Extracting style examples | subject=%s | model=%s', subject, model)
+        compact = model in _COMPACT_MODELS
+        logger.info('Extracting style examples | subject=%s | model=%s | compact=%s', subject, model, compact)
 
         client = self._client()
+        style_max_tokens = 512 if compact else 1024
 
         async def _call_segment(prompt: str) -> str:
-            response = await client.chat.completions.create(
+            response = await _with_retry(
+                client.chat.completions.create,
                 model=model,
                 messages=[{'role': 'user', 'content': prompt}],
-                max_tokens=1024,
+                max_tokens=style_max_tokens,
                 temperature=0,
                 timeout=60,
             )
             return response.choices[0].message.content.strip()
+
+        # Compact models have a tight per-minute token budget — always use a
+        # single call with a shorter input slice to stay well under the limit.
+        if compact:
+            result = await _call_segment(handler.style_examples_prompt(raw_text[:2000]))
+            return '' if result.upper() == 'NONE' else result
 
         segments = _split_into_segments(raw_text)
 
@@ -251,7 +307,11 @@ class AIService:
             'Sampling style examples from %d segments (%s chars each)',
             len(segments), len(segments[0]),
         )
-        results = await asyncio.gather(*[_call_segment(p) for p in prompts])
+        # Sequential — not parallel — to stay within the per-minute token budget.
+        # (3 concurrent calls easily exceed the 6000 TPM limit on all current models.)
+        results = []
+        for p in prompts:
+            results.append(await _call_segment(p))
 
         # Merge non-empty results, labelled by chapter position
         parts = []
@@ -265,24 +325,29 @@ class AIService:
     async def generate_questions(
         self, topic: str, difficulty: str, num_questions: int,
         subject: str = 'Mathematics', question_types: list[QuestionType] | None = None,
+        grade: str = '',
     ) -> list:
         """Generate worksheet questions with full solutions. Returns list of dicts."""
         guidance = _DIFFICULTY_GUIDANCE.get(difficulty, _DIFFICULTY_GUIDANCE['Intermediate'])
         model = self._config.get('text_model', 'llama-3.3-70b-versatile')
+        compact = model in _COMPACT_MODELS
+        max_out = _COMPACT_MODELS.get(model, 8192)
         logger.info(
-            'Generating %d questions | subject=%s | difficulty=%s | types=%s | model=%s',
-            num_questions, subject, difficulty, question_types, model,
+            'Generating %d questions | subject=%s | difficulty=%s | grade=%s | types=%s | model=%s | compact=%s',
+            num_questions, subject, difficulty, grade, question_types, model, compact,
         )
 
         prompt = _get_handler(subject).generate_prompt(
-            topic, difficulty, guidance, num_questions, question_types
+            topic, difficulty, guidance, num_questions, question_types, grade,
+            compact=compact,
         )
 
         client = self._client()
-        response = await client.chat.completions.create(
+        response = await _with_retry(
+            client.chat.completions.create,
             model=model,
             messages=[{'role': 'user', 'content': prompt}],
-            max_tokens=4096,
+            max_tokens=max_out,
             temperature=0.7,
             timeout=120,
         )
@@ -297,30 +362,72 @@ class AIService:
         return questions[:num_questions]
 
     def _parse_questions(self, raw: str) -> list:
-        """Parse JSON from AI response, stripping any accidental markdown fences."""
+        """Parse JSON from AI response, stripping markdown fences.
+
+        If the array is truncated (common when figure schemas push the response
+        close to the token limit) we attempt to recover any complete question
+        objects that were returned before the cut-off.
+        """
         text = raw
         if '```' in text:
-            # Strip markdown code fences
             text = text.split('```')[1]
             if text.startswith('json'):
                 text = text[4:]
         text = text.strip()
 
-        # Find the JSON array boundaries as a fallback
+        # Locate the JSON array
         start = text.find('[')
         end = text.rfind(']')
         if start != -1 and end != -1:
             text = text[start:end + 1]
+        elif start != -1:
+            # Array was cut off before the closing bracket — attempt to close it
+            text = text[start:].rstrip().rstrip(',') + ']'
 
         try:
             data = json.loads(text)
         except json.JSONDecodeError as e:
-            logger.error('JSON parse error: %s\nRaw (first 500 chars): %s', e, raw[:500])
-            raise ValueError(
-                f'The AI returned an unexpected format. Please try again.\nDetail: {e}'
-            ) from e
+            logger.warning('JSON parse failed (%s); attempting partial recovery', e)
+            data = self._recover_partial_json(text)
+            if not data:
+                logger.exception('JSON parse error: %s\nRaw (first 500 chars):\n%s', e, raw[:500])
+                raise ValueError(
+                    f'The AI returned an unexpected format. Please try again.\nDetail: {e}'
+                ) from e
+            logger.info('Partial recovery succeeded: %d question(s) extracted', len(data))
 
         if not isinstance(data, list):
             raise ValueError('AI response was not a JSON array.')
 
         return data
+
+    def _recover_partial_json(self, text: str) -> list:
+        """Extract complete JSON objects from a possibly-truncated array string."""
+        objects: list = []
+        pos = 0
+        while pos < len(text):
+            start = text.find('{', pos)
+            if start == -1:
+                break
+            end = self._find_closing_brace(text, start)
+            if end == -1:
+                break
+            try:
+                objects.append(json.loads(text[start:end + 1]))
+            except json.JSONDecodeError:
+                pass
+            pos = end + 1
+        return objects
+
+    @staticmethod
+    def _find_closing_brace(text: str, start: int) -> int:
+        """Return the index of the closing ``}`` matching ``text[start]``, or -1."""
+        depth = 0
+        for i in range(start, len(text)):
+            if text[i] == '{':
+                depth += 1
+            elif text[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    return i
+        return -1

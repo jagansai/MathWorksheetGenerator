@@ -6,6 +6,7 @@ _TYPE_LABELS: dict[QuestionType, str] = {
     QuestionType.MCQ: 'MCQ (multiple-choice)',
     QuestionType.WORD: 'Word Problem',
     QuestionType.NON_WORD: 'Non-Word Problem',
+    QuestionType.PROOF: 'Proof / Construction',
 }
 
 _TYPE_DESCRIPTIONS: dict[QuestionType, str] = {
@@ -22,6 +23,11 @@ _TYPE_DESCRIPTIONS: dict[QuestionType, str] = {
     QuestionType.NON_WORD: (
         'direct computation or formula-based, no narrative '
         '(e.g. "Solve: 2x + 3 = 9" or "Evaluate: 3^2 + 4^2"); open answer — no choices.'
+    ),
+    QuestionType.PROOF: (
+        'a "Show that\u2026" or "Prove that\u2026" statement requiring a step-by-step geometric or '
+        'algebraic proof; OR a compass-and-ruler construction with precise steps. '
+        'Set needs_diagram: true for constructions, false for written proofs.'
     ),
 }
 
@@ -78,7 +84,8 @@ class _MathHandler(_SubjectHandler):
 
     def generate_prompt(
         self, topic: str, difficulty: str, guidance: str, num_questions: int,
-        question_types: list[QuestionType] | None = None,
+        question_types: list[QuestionType] | None = None, grade: str = '',
+        compact: bool = False,
     ) -> str:
         types = question_types or [QuestionType.NON_WORD]
         breakdown = _compute_breakdown(num_questions, types)
@@ -102,9 +109,11 @@ class _MathHandler(_SubjectHandler):
         else:
             choices_schema = ''
 
+        topic_text = topic[:3000] if compact else topic
+
         return (
             f'You are an experienced math teacher creating a printed practice worksheet.\n\n'
-            f'Content and style reference:\n{topic}\n\n'
+            f'Content and style reference:\n{topic_text}\n\n'
             f'If the content above includes a "\u2500\u2500 Sample problems from source \u2500\u2500" section, '
             f'generate questions that CLOSELY MATCH the style, real-world contexts, and problem '
             f'types shown in those samples \u2014 same structural patterns and variety, but with '
@@ -112,7 +121,9 @@ class _MathHandler(_SubjectHandler):
             f'not just the simplest ones. Problems labelled "[From the middle of the chapter]" '
             f'or "[From the end of the chapter]" represent the intended difficulty level; '
             f'weight your generated questions accordingly.\n\n'
-            f'Difficulty: {difficulty} \u2014 {guidance}\n\n'
+            f'Difficulty: {difficulty} \u2014 {guidance}\n'
+            f'{f"Grade level: {grade}" + chr(10) if grade else ""}'
+            f'\n'
             f'QUESTION TYPE BREAKDOWN \u2014 generate exactly {num_questions} questions total, '
             f'distributed throughout the array:\n'
             f'{type_lines}\n\n'
@@ -123,7 +134,11 @@ class _MathHandler(_SubjectHandler):
             f'2. Students will receive a plain printed sheet. '
             f'If a problem involves a coordinate plane, describe all points and coordinates '
             f'directly in the question text (e.g. "Plot the points A(2,3), B(-1,4) and find..."). '
-            f'A blank coordinate grid will be printed below questions that need one.\n'
+            f'A blank coordinate grid will be printed below questions that need one. '
+            f'IMPORTANT: geometry problems about circles, triangles, angles, or other shapes '
+            f'do NOT need a coordinate grid unless the explicit task is to plot specific '
+            f'coordinate pairs on Cartesian axes. Circle problems should use the "figure" '
+            f'field instead \u2014 never needs_grid for circle problems.\n'
             f'3. Use plain-text math notation (e.g. x^2 + 3x - 4 = 0, not LaTeX).\n'
             f'4. MCQ distractors must be plausible (e.g. common student errors) but unambiguously wrong.\n\n'
             f'IMPORTANT: Return ONLY a valid JSON array \u2014 no markdown, no code fences, '
@@ -135,16 +150,57 @@ class _MathHandler(_SubjectHandler):
             f'  "solution_steps" \u2014 a JSON array of strings, one string per step (minimum 2 steps).\n'
             f'  "final_answer"   \u2014 the concise final answer '
             f'(for MCQ: include the full winning option text, e.g. "B) x = 3").\n'
-            f'  "needs_grid"     \u2014 true if the student must plot points or draw on a coordinate plane '
-            f'to solve the problem, false for all others (always false for MCQ).\n\n'
-            f'REQUIRED JSON FORMAT (structural examples only \u2014 '
+            f'  "needs_grid"     \u2014 true ONLY if the student must plot specific coordinate pairs '
+            f'on a Cartesian (x-y) axis as part of the answer '
+            f'(e.g. "plot A(2,3) and B(-1,4)"); '
+            f'false for all geometry problems about shapes, circles, angles, constructions, '
+            f'or any problem that does not explicitly require plotting on coordinate axes; '
+            f'always false for MCQ.\n'
+            f'  "needs_diagram"  \u2014 true only if the student must physically construct a '
+            f'geometric figure themselves (compass-and-ruler); '
+            f'false when a "figure" is already provided; always false for MCQ.\n'
+            f'  "diagram_label"  \u2014 caption for the blank drawing box when needs_diagram is true; '
+            f'empty string "" otherwise.\n'
+            + (
+                '  "figure"         \u2014 always null for this generation mode.\n'
+                if compact else
+                '  "figure"         \u2014 a JSON object that prints a diagram automatically for geometry questions;\n'
+                '    null for MCQ, word/algebra problems, and anything that does not need a drawn figure.\n'
+                '    Choose the right shape:\n'
+                '      "circle"       \u2014 circle with centre/points/chords/angle arcs.\n'
+                f'        {{"shape":"circle","center":"O","points":[{{"label":"A","angle_deg":150}},{{"label":"B","angle_deg":30}}],\n'
+                f'         "segments":[["O","A"],["O","B"],["A","B"]],'
+                f'"angle_arcs":[{{"vertex":"O","from_point":"A","to_point":"B","label":"120\u00b0"}}],\n'
+                f'         "segment_labels":[{{"on":["O","A"],"text":"10 cm"}}]}}\n'
+                "        angle_deg: 0=right/3-o'clock, increases CCW; "
+                'for central angle X\u00b0 place points at (90+X/2)\u00b0 and (90-X/2)\u00b0.\n'
+                '      "triangle" / "right_triangle"  \u2014 provide actual-value x,y coords.\n'
+                '        Right triangle: right angle at (0,0), legs along +x and +y axes.\n'
+                f'        {{"shape":"triangle","vertices":[{{"label":"A","x":0,"y":4}},{{"label":"B","x":0,"y":0}},{{"label":"C","x":3,"y":0}}],\n'
+                f'         "sides":[{{"from":"A","to":"B","label":"4 cm"}},{{"from":"B","to":"C","label":"3 cm"}},{{"from":"A","to":"C","label":"5 cm"}}],\n'
+                f'         "right_angle_at":"B","angle_labels":[{{"at":"A","label":"53\u00b0"}},{{"at":"C","label":"37\u00b0"}}]}}\n'
+                '      "angle"        \u2014 standalone angle with two rays.\n'
+                f'        {{"shape":"angle","vertex":"O","ray1_deg":0,"ray2_deg":120,"label":"120\u00b0","point1_label":"A","point2_label":"B"}}\n'
+                '      "quadrilateral"\u2014 rectangle, square, parallelogram, trapezoid. Use actual dimensions as coords.\n'
+                '        Rectangle: corners at (0,0),(w,0),(w,h),(0,h); include right_angles_at all four.\n'
+                f'        {{"shape":"quadrilateral","vertices":[{{"label":"A","x":0,"y":0}},{{"label":"B","x":6,"y":0}},{{"label":"C","x":6,"y":4}},{{"label":"D","x":0,"y":4}}],\n'
+                f'         "sides":[{{"from":"A","to":"B","label":"6 cm"}},{{"from":"B","to":"C","label":"4 cm"}},{{"from":"C","to":"D","label":"6 cm"}},{{"from":"D","to":"A","label":"4 cm"}}],\n'
+                f'         "right_angles_at":["A","B","C","D"],"diagonals":[],"angle_labels":[]}}\n'
+                '      "polygon"      \u2014 any closed polygon with x,y vertex coords and optional side labels.\n'
+                '      "number_line"  \u2014 early-grade problems: fractions, integers, inequalities.\n'
+                f'        {{"shape":"number_line","min":0,"max":10,"tick_interval":1,\n'
+                f'         "marked_points":[{{"value":3,"label":"x","color":"#1565c0"}}],'
+                f'"segment":{{"from":3,"to":7,"label":"4 units"}}}}\n'
+                '    Set needs_diagram=false whenever figure is provided (diagram already printed).\n'
+            )
+            + f'\nREQUIRED JSON FORMAT (structural examples only \u2014 '
             f'do NOT copy or reuse these specific problems):\n'
             f'[\n'
-            f'{self._json_examples(types)}\n'
+            f'{self._json_examples(types, compact=compact)}\n'
             f']'
         )
 
-    def _json_examples(self, types: list[QuestionType]) -> str:
+    def _json_examples(self, types: list[QuestionType], compact: bool = False) -> str:
         """Build the structural JSON examples block for the prompt."""
         examples = []
         for t in types:
@@ -157,7 +213,10 @@ class _MathHandler(_SubjectHandler):
                     '    "correct_choice": "<A|B|C|D>",\n'
                     '    "solution_steps": ["<step 1>", "<step 2>"],\n'
                     '    "final_answer": "<letter) full winning option text>",\n'
-                    '    "needs_grid": false\n'
+                    '    "needs_grid": false,\n'
+                    '    "needs_diagram": false,\n'
+                    '    "diagram_label": "",\n'
+                    '    "figure": null\n'
                     '  }'
                 )
             elif t == QuestionType.WORD:
@@ -167,20 +226,56 @@ class _MathHandler(_SubjectHandler):
                     '    "type": "word",\n'
                     '    "solution_steps": ["<step 1>", "<step 2>", "<step 3>"],\n'
                     '    "final_answer": "<concise answer>",\n'
-                    '    "needs_grid": false\n'
+                    '    "needs_grid": false,\n'
+                    '    "needs_diagram": false,\n'
+                    '    "diagram_label": "",\n'
+                    '    "figure": null\n'
                     '  }'
                 )
-            else:  # NON_WORD
+            elif t == QuestionType.NON_WORD:
                 examples.append(
                     '  {\n'
-                    '    "question": "<direct computation, e.g. Solve: 2x + 3 = 9>",\n'
+                    '    "question": "Using a ruler and compass only, construct a triangle PQR'
+                    ' where PQ = 6 cm, QR = 5 cm, and PR = 4 cm.'
+                    ' Then construct the perpendicular bisector of side QR.",\n'
                     '    "type": "non_word",\n'
-                    '    "solution_steps": ["<step 1>", "<step 2>"],\n'
-                    '    "final_answer": "<concise answer>",\n'
-                    '    "needs_grid": false\n'
+                    '    "solution_steps": ["Draw line segment PQ = 6 cm.",'
+                    ' "With Q as centre radius 5 cm and P as centre radius 4 cm, draw arcs;'
+                    ' mark intersection as R.",'
+                    ' "To bisect QR: with Q and R as centres and radius > QR/2,'
+                    ' draw arcs above and below; join intersections."],\n'
+                    '    "final_answer": "Triangle PQR constructed; perpendicular bisector of QR drawn.",\n'
+                    '    "needs_grid": false,\n'
+                    '    "needs_diagram": true,\n'
+                    '    "diagram_label": "Construct triangle PQR and the perpendicular bisector of QR",\n'
+                    '    "figure": null\n'
                     '  }'
                 )
-        return ',\n'.join(examples)
+            elif t == QuestionType.PROOF:
+                proof_figure = (
+                    'null'
+                    if compact else
+                    '{"shape": "circle", "center": "O", "points": [{"label": "A", "angle_deg": 180}, {"label": "B", "angle_deg": 0}, {"label": "C", "angle_deg": 90}], "segments": [["A","B"],["O","C"],["A","C"],["B","C"]], "angle_arcs": [{"vertex": "C", "from_point": "A", "to_point": "B", "label": "90\u00b0"}], "segment_labels": []}'
+                )
+                examples.append(
+                    '  {\n'
+                    '    "question": "Show that the angle subtended by a diameter of a circle '
+                    'at any point on the circle is 90\u00b0.",\n'
+                    '    "type": "proof",\n'
+                    '    "solution_steps": ['
+                    '"Let O be the centre of the circle, AB be the diameter, and C be any point on the circle.",'
+                    ' "Join OC. Since OA = OB = OC (radii), triangles OAC and OBC are isosceles.",'
+                    ' "Let angle OCA = x and angle OCB = y; the equal base angles give angle OAC = x and angle OBC = y.",'
+                    ' "Angles in triangle ABC sum to 180\u00b0: x + y + (x + y) = 180\u00b0, so x + y = 90\u00b0.",'
+                    ' "Therefore angle ACB = 90\u00b0."],\n'
+                    '    "final_answer": "Angle ACB = 90\u00b0 (angle in a semicircle)",\n'
+                    '    "needs_grid": false,\n'
+                    '    "needs_diagram": false,\n'
+                    '    "diagram_label": "",\n'
+                    f'    "figure": {proof_figure}\n'
+                    '  }'
+                )
+        return ",\n".join(examples)
 
 
 _MATH_HANDLER = _MathHandler()

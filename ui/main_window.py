@@ -5,7 +5,9 @@ import subprocess
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
+    QComboBox,
     QHBoxLayout,
+    QLabel,
     QMainWindow,
     QMenuBar,
     QMessageBox,
@@ -76,7 +78,28 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
 
         root.addWidget(splitter)
-        root.addSpacing(10)
+        root.addSpacing(6)
+
+        # Model selector row
+        model_row = QHBoxLayout()
+        model_row.addStretch()
+        model_row.addWidget(QLabel('Text model:'))
+        self._model_combo = QComboBox()
+        self._model_combo.setMinimumWidth(220)
+        _text_models = self._config.get(
+            'text_model_options',
+            ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'gemma2-9b-it'],
+        )
+        self._model_combo.addItems(_text_models)
+        current_model = self._config.get('text_model', _text_models[0])
+        idx = self._model_combo.findText(current_model)
+        if idx >= 0:
+            self._model_combo.setCurrentIndex(idx)
+        self._model_combo.currentTextChanged.connect(self._on_model_changed)
+        model_row.addWidget(self._model_combo)
+        model_row.addStretch()
+        root.addLayout(model_row)
+        root.addSpacing(4)
 
         # Generate button
         self._generate_btn = QPushButton('  Generate Worksheet  ')
@@ -99,7 +122,8 @@ class MainWindow(QMainWindow):
         """)
         self._generate_btn.clicked.connect(self._on_generate)
         self._generate_btn.setEnabled(False)
-        self._options_panel.approve_check.toggled.connect(self._generate_btn.setEnabled)
+        self._options_panel.approve_check.toggled.connect(self._update_generate_btn)
+        self._options_panel.grade_combo.currentIndexChanged.connect(self._update_generate_btn)
         root.addWidget(self._generate_btn, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         # Status bar
@@ -131,6 +155,22 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self):
         SettingsDialog(self._config, parent=self).exec()
+        # Refresh model combo in case the user changed it via Settings
+        current = self._config.get('text_model', '')
+        idx = self._model_combo.findText(current)
+        if idx >= 0:
+            self._model_combo.blockSignals(True)
+            self._model_combo.setCurrentIndex(idx)
+            self._model_combo.blockSignals(False)
+
+    def _on_model_changed(self, model: str):
+        self._config.set('text_model', model)
+        self._status.showMessage(f'Text model switched to: {model}', 4000)
+
+    def _update_generate_btn(self):
+        """Enable Generate only when both a grade is selected and content is approved."""
+        grade_ok = bool(self._options_panel.get_grade())
+        self._generate_btn.setEnabled(grade_ok and self._options_panel.get_approved())
 
     def _on_subject_changed(self, subject: str):
         """Called when the user changes the subject combo in the image panel."""
@@ -274,6 +314,13 @@ class MainWindow(QMainWindow):
             return
 
         difficulty = self._options_panel.get_difficulty()
+        grade = self._options_panel.get_grade()
+        if not grade:
+            QMessageBox.warning(
+                self, 'No Grade Selected',
+                'Please select a grade level before generating.',
+            )
+            return
         num_questions = self._options_panel.get_num_questions()
         output_dir = self._options_panel.get_output_dir()
         question_types = self._options_panel.get_question_types()
@@ -286,7 +333,7 @@ class MainWindow(QMainWindow):
         self._worksheet_worker = WorksheetWorker(
             self._ai, self._config,
             topic, difficulty, num_questions, output_dir, self._current_subject,
-            question_types,
+            question_types, grade,
         )
         self._worksheet_worker.step_updated.connect(self._progress.set_step)
         self._worksheet_worker.finished.connect(self._on_generation_done)
@@ -298,7 +345,7 @@ class MainWindow(QMainWindow):
     def _on_generation_done(self, student_path: str, teacher_path: str):
         if self._progress:
             self._progress.accept()
-        self._generate_btn.setEnabled(self._options_panel.get_approved())
+        self._update_generate_btn()
 
         folder = os.path.dirname(student_path)
         self._status.showMessage(f'Done!  Files saved to: {folder}')
@@ -322,7 +369,7 @@ class MainWindow(QMainWindow):
     def _on_generation_error(self, error: str):
         if self._progress:
             self._progress.accept()
-        self._generate_btn.setEnabled(self._options_panel.get_approved())
+        self._update_generate_btn()
         self._status.showMessage('Generation failed.')
         QMessageBox.critical(
             self, 'Generation Failed',

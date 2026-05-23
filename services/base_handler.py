@@ -7,6 +7,7 @@ class QuestionType(str, Enum):
     MCQ = 'mcq'
     WORD = 'word'
     NON_WORD = 'non_word'
+    PROOF = 'proof'
 
 
 class _SubjectHandler:
@@ -20,6 +21,7 @@ class _SubjectHandler:
 
     def generate_prompt(
         self, topic: str, difficulty: str, guidance: str, num_questions: int,
-        question_types: list[QuestionType] | None = None,
+        question_types: list[QuestionType] | None = None, grade: str = '',
+        compact: bool = False,
     ) -> str:
         raise NotImplementedError

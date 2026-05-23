@@ -1,4 +1,4 @@
-"""Prompt handler tuned for Chemistry worksheets (CBSE Class 9 focus)."""
+"""Prompt handler tuned for Chemistry worksheets."""
 
 from services.base_handler import QuestionType, _SubjectHandler
 
@@ -6,6 +6,7 @@ _TYPE_LABELS: dict[QuestionType, str] = {
     QuestionType.MCQ: 'MCQ (multiple-choice)',
     QuestionType.WORD: 'Application / Descriptive',
     QuestionType.NON_WORD: 'Direct Knowledge',
+    QuestionType.PROOF: 'Extended Reasoning',
 }
 
 _TYPE_DESCRIPTIONS: dict[QuestionType, str] = {
@@ -27,6 +28,13 @@ _TYPE_DESCRIPTIONS: dict[QuestionType, str] = {
         '"State two properties that distinguish a mixture from a compound"); '
         'open answer — no choices.'
     ),
+    QuestionType.PROOF: (
+        'multi-step reasoning or calculation requiring the student to show or justify '
+        'a chemical result (e.g. "Show by calculation that the empirical formula of a compound '
+        'containing 40% C, 6.7% H, and 53.3% O is CH2O", '
+        '"Justify why the reaction 2H2 + O2 -> 2H2O obeys the law of conservation of mass"); '
+        'open answer — no choices.'
+    ),
 }
 
 
@@ -39,17 +47,17 @@ def _compute_breakdown(num_questions: int, question_types: list[QuestionType]) -
 
 
 class _ChemistryHandler(_SubjectHandler):
-    """Prompts tuned for CBSE Chemistry worksheets (primarily Class 9)."""
+    """Prompts tuned for Chemistry worksheets (primarily Class 9)."""
 
     def summarize_prompt(self, raw_text: str) -> str:
         return (
-            'You are helping generate a standalone Chemistry practice worksheet for CBSE students. '
+            'You are helping generate a standalone Chemistry practice worksheet for students. '
             'Below is content extracted from a Chemistry resource. '
             'Identify the chemistry CONCEPTS, SKILLS, and QUESTION TYPES that students would actually practise — '
             'ignore introductory narrative, historical context, biographies, and any non-question text. '
             'Fill in EXACTLY this template — no extra text before or after, no markdown, no bullet symbols:\n\n'
             'Topic: <specific chemistry topic, e.g. "Atoms and Molecules — chemical formulae and atomic mass">\n'
-            'Grade level: <approximate grade, e.g. "Grade 9 (CBSE)">\n'
+            'Grade level: <approximate grade, e.g. "Grade 9">\n'
             'Problem types: <comma-separated list of practice question types, '
             'e.g. "balancing equations, writing chemical formulae, defining terms, '
             'distinguishing mixtures from compounds">\n'
@@ -85,7 +93,8 @@ class _ChemistryHandler(_SubjectHandler):
 
     def generate_prompt(
         self, topic: str, difficulty: str, guidance: str, num_questions: int,
-        question_types: list[QuestionType] | None = None,
+        question_types: list[QuestionType] | None = None, grade: str = '',
+        compact: bool = False,
     ) -> str:
         types = question_types or [QuestionType.NON_WORD]
         breakdown = _compute_breakdown(num_questions, types)
@@ -110,7 +119,7 @@ class _ChemistryHandler(_SubjectHandler):
             choices_schema = ''
 
         return (
-            f'You are an experienced Chemistry teacher (CBSE Class 9) creating a printed practice worksheet.\n\n'
+            f'You are an experienced Chemistry teacher creating a printed practice worksheet.\n\n'
             f'Content and style reference:\n{topic}\n\n'
             f'If the content above includes a "\u2500\u2500 Sample problems from source \u2500\u2500" section, '
             f'generate questions that CLOSELY MATCH the style, real-world contexts, and question '
@@ -119,7 +128,9 @@ class _ChemistryHandler(_SubjectHandler):
             f'not just the simplest definitional ones. Questions labelled "[From the middle of the chapter]" '
             f'or "[From the end of the chapter]" represent the intended difficulty level; '
             f'weight your generated questions accordingly.\n\n'
-            f'Difficulty: {difficulty} \u2014 {guidance}\n\n'
+            f'Difficulty: {difficulty} \u2014 {guidance}\n'
+            f'{f"Grade level: {grade}" + chr(10) if grade else ""}'
+            f'\n'
             f'QUESTION TYPE BREAKDOWN \u2014 generate exactly {num_questions} questions total, '
             f'distributed throughout the array:\n'
             f'{type_lines}\n\n'
@@ -147,7 +158,7 @@ class _ChemistryHandler(_SubjectHandler):
             f'  "solution_steps" \u2014 a JSON array of strings, one string per step (minimum 2 steps).\n'
             f'  "final_answer"   \u2014 the concise final answer '
             f'(for MCQ: include the full winning option text, e.g. "B) NaCl").\n'
-            f'  "needs_grid"     \u2014 false (always false for chemistry).\n\n'
+            f'  "needs_diagram"  \u2014 false (always false for chemistry).\n\n'
             f'REQUIRED JSON FORMAT (structural examples only \u2014 '
             f'do NOT copy or reuse these specific questions):\n'
             f'[\n'
@@ -168,7 +179,7 @@ class _ChemistryHandler(_SubjectHandler):
             ' Burning wood produces CO2 and H2O -- new substances.",'
             ' "Melting, dissolving, and cutting are physical changes."],\n'
             '    "final_answer": "C) Burning of wood",\n'
-            '    "needs_grid": false\n'
+            '    "needs_diagram": false\n'
             '  }'
         )
         _WORD_EX = (
@@ -182,7 +193,7 @@ class _ChemistryHandler(_SubjectHandler):
             ' water, this is a reversible physical change."],\n'
             '    "final_answer": "Physical change (loss of water of crystallisation),'
             ' reversible because adding water restores blue CuSO4.5H2O.",\n'
-            '    "needs_grid": false\n'
+            '    "needs_diagram": false\n'
             '  }'
         )
         _NON_WORD_EX = (
@@ -192,13 +203,27 @@ class _ChemistryHandler(_SubjectHandler):
             '    "solution_steps": ["Count atoms: Left 1 Fe, 2 O; Right 2 Fe, 3 O.",'
             ' "Place coefficients: 4Fe + 3O2 -> 2Fe2O3. Verify: 4 Fe and 6 O each side."],\n'
             '    "final_answer": "4Fe + 3O2 -> 2Fe2O3",\n'
-            '    "needs_grid": false\n'
+            '    "needs_diagram": false\n'
+            '  }'
+        )
+        _PROOF_EX = (
+            '  {\n'
+            '    "question": "A compound contains 40% carbon, 6.7% hydrogen, and 53.3% oxygen by mass.'
+            ' Show by calculation that its empirical formula is CH2O.",\n'
+            '    "type": "proof",\n'
+            '    "solution_steps": ["Assume 100 g sample: C = 40 g, H = 6.7 g, O = 53.3 g.",'
+            ' "Moles: C = 40/12 = 3.33, H = 6.7/1 = 6.7, O = 53.3/16 = 3.33.",'
+            ' "Divide by smallest (3.33): C = 1, H = 2, O = 1.",'
+            ' "Empirical formula = CH2O."],\n'
+            '    "final_answer": "CH2O",\n'
+            '    "needs_diagram": false\n'
             '  }'
         )
         _MAP = {
             QuestionType.MCQ: _MCQ_EX,
             QuestionType.WORD: _WORD_EX,
             QuestionType.NON_WORD: _NON_WORD_EX,
+            QuestionType.PROOF: _PROOF_EX,
         }
         return ',\n'.join(_MAP[t] for t in types if t in _MAP)
 

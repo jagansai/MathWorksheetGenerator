@@ -20,6 +20,7 @@ from utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 DIFFICULTY_LEVELS = ['Beginner', 'Intermediate', 'Advanced']
+GRADE_LEVELS = [f'Grade {i}' for i in range(1, 13)]
 
 
 class OptionsPanel(QWidget):
@@ -79,6 +80,23 @@ class OptionsPanel(QWidget):
         diff_row.addWidget(self.difficulty_combo)
         diff_row.addStretch()
 
+        # Grade
+        grade_row = QHBoxLayout()
+        grade_row.addWidget(QLabel('Grade:'))
+        self.grade_combo = QComboBox()
+        self.grade_combo.setPlaceholderText('Select a grade...')
+        self.grade_combo.addItems(GRADE_LEVELS)
+        default_grade = self._config.get('default_grade', '')
+        if default_grade:
+            idx = self.grade_combo.findText(default_grade)
+            if idx >= 0:
+                self.grade_combo.setCurrentIndex(idx)
+        else:
+            self.grade_combo.setCurrentIndex(-1)
+        grade_row.addWidget(self.grade_combo)
+        grade_row.addStretch()
+        self.grade_combo.currentIndexChanged.connect(self._on_grade_changed)
+
         # Number of questions
         num_row = QHBoxLayout()
         num_row.addWidget(QLabel('Number of questions:'))
@@ -89,6 +107,7 @@ class OptionsPanel(QWidget):
         num_row.addStretch()
 
         ws_layout.addLayout(diff_row)
+        ws_layout.addLayout(grade_row)
         ws_layout.addLayout(num_row)
 
         # ---- Question types ----
@@ -104,11 +123,14 @@ class OptionsPanel(QWidget):
         self.word_check = QCheckBox('Word Problems')
         self.non_word_check = QCheckBox('Non-Word Problems  (computation / formula-based)')
         self.non_word_check.setChecked(True)
+        self.proof_check = QCheckBox('Challenge Questions  (Proof / Show that\u2026 / Constructions)')
+        self.proof_check.setVisible(False)
 
         qt_layout.addWidget(qt_hint)
         qt_layout.addWidget(self.mcq_check)
         qt_layout.addWidget(self.word_check)
         qt_layout.addWidget(self.non_word_check)
+        qt_layout.addWidget(self.proof_check)
 
         # ---- Output directory ----
         out_group = QGroupBox('Output Directory')
@@ -135,6 +157,17 @@ class OptionsPanel(QWidget):
         if d:
             self.output_edit.setText(d)
 
+    def _on_grade_changed(self, _index: int):
+        grade_text = self.grade_combo.currentText()
+        try:
+            grade_num = int(grade_text.split()[-1])
+            show = grade_num >= 7
+        except (ValueError, IndexError):
+            show = False
+        self.proof_check.setVisible(show)
+        if not show:
+            self.proof_check.setChecked(False)
+
     # ------------------------------------------------------------------
     # Public accessors
     # ------------------------------------------------------------------
@@ -147,6 +180,9 @@ class OptionsPanel(QWidget):
 
     def get_difficulty(self) -> str:
         return self.difficulty_combo.currentText()
+
+    def get_grade(self) -> str:
+        return self.grade_combo.currentText()
 
     def get_num_questions(self) -> int:
         return self.num_spin.value()
@@ -169,4 +205,6 @@ class OptionsPanel(QWidget):
             types.append(QuestionType.WORD)
         if self.non_word_check.isChecked():
             types.append(QuestionType.NON_WORD)
+        if self.proof_check.isChecked() and self.proof_check.isVisible():
+            types.append(QuestionType.PROOF)
         return types or [QuestionType.NON_WORD]  # fallback: never return empty
