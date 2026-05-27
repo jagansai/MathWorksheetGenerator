@@ -26,15 +26,15 @@ def setup_logger(name: str) -> logging.Logger:
     logger.addHandler(ch)
 
     log_dir = _get_log_dir()
-    if os.path.exists(log_dir):
-        try:
-            fh = logging.FileHandler(
-                os.path.join(log_dir, 'worksheet_app.log'), encoding='utf-8'
-            )
-            fh.setLevel(logging.DEBUG)
-            fh.setFormatter(fmt)
-            logger.addHandler(fh)
-        except Exception:
-            pass
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        fh = logging.FileHandler(
+            os.path.join(log_dir, 'worksheet_app.log'), encoding='utf-8'
+        )
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(fmt)
+        logger.addHandler(fh)
+    except Exception:
+        pass
 
     return logger

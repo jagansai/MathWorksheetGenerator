@@ -119,6 +119,19 @@ if (-not $OneFile) {
 }
 
 # ---------------------------------------------------------------------------
+# 3c. Kill any running instance so locked files (e.g. the log) don't block the clean
+# ---------------------------------------------------------------------------
+$running = Get-Process -Name $AppName -ErrorAction SilentlyContinue
+if ($running) {
+    Write-Host "   Stopping running instance of $AppName..." -ForegroundColor Yellow
+    $running | Stop-Process -Force -ErrorAction SilentlyContinue
+    # Give the OS a moment to release file handles
+    $deadline = (Get-Date).AddSeconds(3)
+    while ((Get-Process -Name $AppName -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {}
+    Write-OK 'Running instance stopped.'
+}
+
+# ---------------------------------------------------------------------------
 # 4. Clean previous artifacts (always clean onedir target; full clean if -Clean)
 # ---------------------------------------------------------------------------
 Write-Step 'Cleaning old artifacts'
