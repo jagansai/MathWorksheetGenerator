@@ -154,3 +154,86 @@ class WorksheetWorker(QThread):
         )
 
         self.finished.emit(student_path, teacher_path)
+
+
+# ---------------------------------------------------------------------------
+# Two-step workers for the review-before-PDF workflow
+# ---------------------------------------------------------------------------
+
+class QuestionFetchWorker(QThread):
+    """Step 1 — asks the AI for questions and emits them for user review."""
+
+    step_updated = pyqtSignal(str)
+    questions_ready = pyqtSignal(list)   # list of question dicts
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        ai_service: AIService,
+        config_manager: 'ConfigManager',
+        topic: str,
+        difficulty: str,
+        num_questions: int,
+        subject: str = 'Mathematics',
+        question_types: list[QuestionType] | None = None,
+        grade: str = '',
+    ):
+        super().__init__()
+        self._ai = ai_service
+        self._config = config_manager
+        self._topic = topic
+        self._difficulty = difficulty
+        self._num_questions = num_questions
+        self._subject = subject
+        self._question_types = question_types or [QuestionType.NON_WORD]
+        self._grade = grade
+
+    def run(self):
+        try:
+            asyncio.run(self._run_async())
+        except Exception as e:
+            logger.exception('Question fetch failed')
+            self.error.emit(str(e))
+
+    async def _run_async(self):
+        self.step_updated.emit(
+            f'Asking AI to generate {self._num_questions} questions ({self._difficulty})...'
+        )
+        questions = await self._ai.generate_questions(
+            self._topic, self._difficulty, self._num_questions,
+            self._subject, self._question_types, self._grade,
+        )
+        logger.info('Received %d questions from AI', len(questions))
+        self.questions_ready.emit(questions)
+
+
+class PDFCreateWorker(QThread):
+    """Step 2 — writes PDFs from the user-approved question list."""
+
+    step_updated = pyqtSignal(str)
+    finished = pyqtSignal(str, str)   # (student_path, teacher_path)
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        questions: list,
+        topic: str,
+        output_dir: str,
+        subject: str = 'Mathematics',
+    ):
+        super().__init__()
+        self._questions = questions
+        self._topic = topic
+        self._output_dir = output_dir
+        self._subject = subject
+
+    def run(self):
+        try:
+            self.step_updated.emit('Creating PDF files...')
+            student_path, teacher_path = generate_pdfs(
+                self._questions, self._topic, self._output_dir, self._subject
+            )
+            self.finished.emit(student_path, teacher_path)
+        except Exception as e:
+            logger.exception('PDF creation failed')
+            self.error.emit(str(e))

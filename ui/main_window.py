@@ -20,11 +20,17 @@ from PyQt6.QtWidgets import (
 )
 
 from services.ai_service import AIService
-from services.worksheet_service import ImageAnalysisWorker, PDFAnalysisWorker, WorksheetWorker
+from services.worksheet_service import (
+    ImageAnalysisWorker,
+    PDFAnalysisWorker,
+    PDFCreateWorker,
+    QuestionFetchWorker,
+)
 from ui.image_panel import ImagePanel
 from ui.options_panel import OptionsPanel
 from ui.page_range_dialog import PageRangeDialog
 from ui.progress_dialog import ProgressDialog
+from ui.review_dialog import ReviewDialog
 from ui.settings_dialog import SettingsDialog
 from utils.logger import setup_logger
 
@@ -38,8 +44,12 @@ class MainWindow(QMainWindow):
         self._ai = AIService(config_manager)
         self._analysis_worker: ImageAnalysisWorker | None = None
         self._pdf_worker: PDFAnalysisWorker | None = None
-        self._worksheet_worker: WorksheetWorker | None = None
+        self._fetch_worker: QuestionFetchWorker | None = None
+        self._pdf_create_worker: PDFCreateWorker | None = None
         self._progress: ProgressDialog | None = None
+        # Stash generation params across the two-step flow
+        self._pending_topic: str = ''
+        self._pending_output_dir: str = ''
         self._current_subject: str = ''
         self._setup_ui()
 
@@ -327,20 +337,57 @@ class MainWindow(QMainWindow):
 
         self._generate_btn.setEnabled(False)
 
+        # Store params needed for the PDF step (after user review)
+        topic_for_pdf = topic.split('\n\n\u2500\u2500 Sample problems from source \u2500\u2500')[0].strip()
+        self._pending_topic = topic_for_pdf
+        self._pending_output_dir = output_dir
+
         self._progress = ProgressDialog(self)
         self._progress.set_step('Connecting to Groq AI...')
 
-        self._worksheet_worker = WorksheetWorker(
+        self._fetch_worker = QuestionFetchWorker(
             self._ai, self._config,
-            topic, difficulty, num_questions, output_dir, self._current_subject,
+            topic, difficulty, num_questions, self._current_subject,
             question_types, grade,
         )
-        self._worksheet_worker.step_updated.connect(self._progress.set_step)
-        self._worksheet_worker.finished.connect(self._on_generation_done)
-        self._worksheet_worker.error.connect(self._on_generation_error)
-        self._worksheet_worker.start()
+        self._fetch_worker.step_updated.connect(self._progress.set_step)
+        self._fetch_worker.questions_ready.connect(self._on_questions_ready)
+        self._fetch_worker.error.connect(self._on_generation_error)
+        self._fetch_worker.start()
 
         self._progress.exec()   # blocks until accept()/reject() called from worker signals
+
+    def _on_questions_ready(self, questions: list):
+        """Called when the AI returns questions — close progress, open review dialog."""
+        if self._progress:
+            self._progress.accept()
+
+        dlg = ReviewDialog(
+            questions, self._pending_topic, self._current_subject, parent=self
+        )
+        if dlg.exec() != ReviewDialog.DialogCode.Accepted:
+            self._update_generate_btn()
+            self._status.showMessage('PDF creation cancelled.')
+            return
+
+        selected = dlg.get_selected_questions()
+        if not selected:
+            self._update_generate_btn()
+            return
+
+        self._progress = ProgressDialog(self)
+        self._progress.set_step('Creating PDF files...')
+
+        self._pdf_create_worker = PDFCreateWorker(
+            selected, self._pending_topic,
+            self._pending_output_dir, self._current_subject,
+        )
+        self._pdf_create_worker.step_updated.connect(self._progress.set_step)
+        self._pdf_create_worker.finished.connect(self._on_generation_done)
+        self._pdf_create_worker.error.connect(self._on_generation_error)
+        self._pdf_create_worker.start()
+
+        self._progress.exec()
 
     def _on_generation_done(self, student_path: str, teacher_path: str):
         if self._progress:

@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTextEdit,
     QVBoxLayout,
@@ -30,8 +31,19 @@ class OptionsPanel(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # Outer layout holds only the scroll area so the panel is usable on
+        # small / low-resolution screens (e.g. 13").
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(0, 4, 4, 4)
         layout.setSpacing(10)
 
         # ---- Topic description + approval ----
@@ -149,6 +161,9 @@ class OptionsPanel(QWidget):
         layout.addWidget(qt_group)
         layout.addWidget(out_group)
         layout.addStretch()
+
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
 
     def _browse_output(self):
         d = QFileDialog.getExistingDirectory(
