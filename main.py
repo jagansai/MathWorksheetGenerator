@@ -9,7 +9,7 @@ import sys
 if sys.platform == 'win32':
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            'WorksheetApp.MathWorksheetGenerator.1'
+            'WorksheetApp.WorksheetGenerator.1'
         )
     except Exception:
         pass

@@ -82,7 +82,7 @@ and bundling — in one step.
 .\scripts\build_exe.ps1
 ```
 
-Output: `dist\MathWorksheetGenerator\MathWorksheetGenerator.exe`
+Output: `dist\WorksheetGenerator\WorksheetGenerator.exe`
 
 ### Single-file build (one portable .exe, slightly slower cold start)
 
@@ -90,7 +90,7 @@ Output: `dist\MathWorksheetGenerator\MathWorksheetGenerator.exe`
 .\scripts\build_exe.ps1 -OneFile
 ```
 
-Output: `dist\MathWorksheetGenerator.exe`
+Output: `dist\WorksheetGenerator.exe`
 
 ### Force a clean rebuild
 
@@ -114,12 +114,12 @@ Output: `dist\MathWorksheetGenerator.exe`
 
 **Folder bundle:**
 ```
-dist\MathWorksheetGenerator\MathWorksheetGenerator.exe
+dist\WorksheetGenerator\WorksheetGenerator.exe
 ```
 
 **Single file:**
 ```
-dist\MathWorksheetGenerator.exe
+dist\WorksheetGenerator.exe
 ```
 
 > The `config\config.json` is bundled as a default. Any settings changed via

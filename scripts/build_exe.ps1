@@ -1,4 +1,4 @@
-# Build Math Worksheet Generator as a standalone executable.
+# Build Worksheet Generator as a standalone executable.
 #
 # Usage:
 #   .\scripts\build_exe.ps1            # onedir bundle (faster startup — recommended)
@@ -12,7 +12,7 @@ param(
     [switch]$Force   # skip the "no updates" short-circuit
 )
 
-$AppName    = 'MathWorksheetGenerator'
+$AppName    = 'WorksheetGenerator'
 $ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 $DistDir    = Join-Path $ProjectRoot 'dist'
