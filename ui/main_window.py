@@ -188,6 +188,7 @@ class MainWindow(QMainWindow):
         self._cancel_analysis_workers()
         self._options_panel.set_topic('')
         self._options_panel.reset_approval()
+        self._options_panel.adapt_for_subject(subject)
         self._generate_btn.setEnabled(False)
         if subject:
             self._status.showMessage(

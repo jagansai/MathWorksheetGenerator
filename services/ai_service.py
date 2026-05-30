@@ -12,6 +12,7 @@ from services.base_handler import QuestionType, _SubjectHandler
 from services.math_handler import _MATH_HANDLER
 from services.chemistry_handler import _CHEMISTRY_HANDLER
 from services.physics_handler import _PHYSICS_HANDLER
+from services.biology_handler import _BIOLOGY_HANDLER
 from utils.logger import setup_logger
 
 if TYPE_CHECKING:
@@ -140,6 +141,8 @@ def _get_handler(subject: str) -> _SubjectHandler:
         return _CHEMISTRY_HANDLER
     if subject == 'Physics':
         return _PHYSICS_HANDLER
+    if subject == 'Biology':
+        return _BIOLOGY_HANDLER
     return _GenericHandler(subject)
 
 

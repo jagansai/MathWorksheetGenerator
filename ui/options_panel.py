@@ -24,10 +24,27 @@ DIFFICULTY_LEVELS = ['Beginner', 'Intermediate', 'Advanced']
 GRADE_LEVELS = [f'Grade {i}' for i in range(1, 13)]
 
 
+# Checkbox labels that differ per subject.  Keyed by subject name;
+# '_default' applies to all subjects that are not explicitly listed.
+_SUBJECT_QT_LABELS: dict[str, dict[str, str]] = {
+    'Biology': {
+        'word':     'Application / Descriptive',
+        'non_word': 'Define / Identify / List',
+        'proof':    'Extended Answer  (Compare, Contrast, Describe a process)',
+    },
+    '_default': {
+        'word':     'Word Problems',
+        'non_word': 'Non-Word Problems  (computation / formula-based)',
+        'proof':    'Challenge Questions  (Proof / Show that… / Constructions)',
+    },
+}
+
+
 class OptionsPanel(QWidget):
     def __init__(self, config_manager, parent=None):
         super().__init__(parent)
         self._config = config_manager
+        self._current_subject: str = ''
         self._setup_ui()
 
     def _setup_ui(self):
@@ -173,6 +190,10 @@ class OptionsPanel(QWidget):
             self.output_edit.setText(d)
 
     def _on_grade_changed(self, _index: int):
+        # Biology always hides proof_check (Extended Answer visibility is
+        # controlled entirely by adapt_for_subject).
+        if self._current_subject == 'Biology':
+            return
         grade_text = self.grade_combo.currentText()
         try:
             grade_num = int(grade_text.split()[-1])
@@ -223,3 +244,27 @@ class OptionsPanel(QWidget):
         if self.proof_check.isChecked() and self.proof_check.isVisible():
             types.append(QuestionType.PROOF)
         return types or [QuestionType.NON_WORD]  # fallback: never return empty
+
+    def adapt_for_subject(self, subject: str):
+        """Update question-type checkbox labels and defaults for *subject*."""
+        self._current_subject = subject
+        labels = _SUBJECT_QT_LABELS.get(subject, _SUBJECT_QT_LABELS['_default'])
+        self.word_check.setText(labels['word'])
+        self.non_word_check.setText(labels['non_word'])
+        self.proof_check.setText(labels['proof'])
+
+        if subject == 'Biology':
+            # Biology proof (Extended Answer) is shown from Grade 7 onward,
+            # same as other subjects — re-trigger grade logic to set visibility.
+            grade_text = self.grade_combo.currentText()
+            try:
+                grade_num = int(grade_text.split()[-1])
+                show = grade_num >= 7
+            except (ValueError, IndexError):
+                show = False
+            self.proof_check.setVisible(show)
+            if not show:
+                self.proof_check.setChecked(False)
+        else:
+            # Restore standard grade-driven visibility for non-biology subjects.
+            self._on_grade_changed(-1)
