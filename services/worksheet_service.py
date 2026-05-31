@@ -6,7 +6,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from services.ai_service import AIService
 from services.base_handler import QuestionType
-from utils.pdf_generator import generate_pdfs
+from utils.pdf_generator import generate_pdfs, WorksheetHeader
 from utils.logger import setup_logger
 
 if TYPE_CHECKING:
@@ -220,18 +220,20 @@ class PDFCreateWorker(QThread):
         topic: str,
         output_dir: str,
         subject: str = 'Mathematics',
+        header: WorksheetHeader | None = None,
     ):
         super().__init__()
         self._questions = questions
         self._topic = topic
         self._output_dir = output_dir
         self._subject = subject
+        self._header = header
 
     def run(self):
         try:
             self.step_updated.emit('Creating PDF files...')
             student_path, teacher_path = generate_pdfs(
-                self._questions, self._topic, self._output_dir, self._subject
+                self._questions, self._topic, self._output_dir, self._subject, self._header
             )
             self.finished.emit(student_path, teacher_path)
         except Exception as e:

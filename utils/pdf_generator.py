@@ -1,6 +1,7 @@
 """PDF generation: student worksheet and teacher answer key."""
 import os
 import re
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from fpdf import FPDF
@@ -23,6 +24,20 @@ _GRID_SIZE  = 2 * _GRID_RANGE * _GRID_CELL   # 90 mm total
 
 # Blank diagram box constants
 _DIAGRAM_BOX_H = 55                      # mm — height of blank drawing area
+
+# ---------------------------------------------------------------------------
+# Public header data-class (imported by ui/header_options_dialog.py)
+# ---------------------------------------------------------------------------
+@dataclass
+class WorksheetHeader:
+    """User-configurable header options that are printed on the first page."""
+    title: str = 'Worksheet'
+    title_font_size: int = 20
+    grade: str = ''          # pre-filled class / grade text; blank → show underline
+    show_name_line: bool = True
+    show_marks_line: bool = False
+    total_marks: int = 20
+
 
 # Per-subject worksheet titles
 _SUBJECT_TITLE: dict[str, str] = {
@@ -263,6 +278,9 @@ class _BasePDF(FPDF):
         self.set_auto_page_break(auto=True, margin=MARGIN)
 
     def header(self):
+        # Skip the running header on the first page — the title block serves that role.
+        if self.page_no() == 1:
+            return
         self.set_font('Helvetica', 'I', 9)
         self.set_text_color(130, 130, 130)
         self.cell(0, 6, _sanitize(self._header_text), align='C', new_x='LMARGIN', new_y='NEXT')
@@ -282,21 +300,41 @@ class _BasePDF(FPDF):
 # ---------------------------------------------------------------------------
 # Student worksheet
 # ---------------------------------------------------------------------------
-def build_student_pdf(questions: list, topic: str, output_path: str, subject: str = 'Mathematics'):
-    title = _SUBJECT_TITLE.get(subject, f'{subject} Worksheet')
+def build_student_pdf(
+    questions: list,
+    topic: str,
+    output_path: str,
+    subject: str = 'Mathematics',
+    header: WorksheetHeader | None = None,
+):
+    default_title = _SUBJECT_TITLE.get(subject, f'{subject} Worksheet')
+    title      = header.title           if header else default_title
+    title_size = header.title_font_size if header else 20
+
     pdf = _BasePDF(title)
     pdf.add_page()
 
     # --- Title block ---
-    pdf.set_font('Helvetica', 'B', 20)
-    pdf.cell(0, 12, title, align='C', new_x='LMARGIN', new_y='NEXT')
+    pdf.set_font('Helvetica', 'B', title_size)
+    pdf.cell(0, 12, _sanitize(title), align='C', new_x='LMARGIN', new_y='NEXT')
 
     _render_topic_block(pdf, topic)
 
-    # --- Student info row ---
+    # --- Student info block ---
     pdf.set_font('Helvetica', '', 11)
-    pdf.cell(0, 8, 'Name: ___________________________', new_x='LMARGIN', new_y='NEXT')
-    pdf.cell(0, 8, 'Class: __________________________', new_x='LMARGIN', new_y='NEXT')
+    if header:
+        grade_text = _sanitize(header.grade) if header.grade else None
+        if grade_text:
+            pdf.cell(0, 8, f'Class / Grade:  {grade_text}', new_x='LMARGIN', new_y='NEXT')
+        else:
+            pdf.cell(0, 8, 'Class / Grade: ______________________', new_x='LMARGIN', new_y='NEXT')
+        if header.show_name_line:
+            pdf.cell(0, 8, 'Name: ___________________________', new_x='LMARGIN', new_y='NEXT')
+        if header.show_marks_line:
+            pdf.cell(0, 8, f'Marks: ________ / {header.total_marks}', new_x='LMARGIN', new_y='NEXT')
+    else:
+        pdf.cell(0, 8, 'Name: ___________________________', new_x='LMARGIN', new_y='NEXT')
+        pdf.cell(0, 8, 'Class: __________________________', new_x='LMARGIN', new_y='NEXT')
     pdf.ln(2)
 
     pdf.set_draw_color(80, 80, 80)
@@ -339,9 +377,17 @@ def build_student_pdf(questions: list, topic: str, output_path: str, subject: st
 # ---------------------------------------------------------------------------
 # Teacher answer key
 # ---------------------------------------------------------------------------
-def build_teacher_pdf(questions: list, topic: str, output_path: str, subject: str = 'Mathematics'):
-    title = _SUBJECT_TITLE.get(subject, f'{subject} Worksheet')
-    pdf = _BasePDF(f'TEACHER COPY - {title} - Answer Key')
+def build_teacher_pdf(
+    questions: list,
+    topic: str,
+    output_path: str,
+    subject: str = 'Mathematics',
+    header: WorksheetHeader | None = None,
+):
+    default_title = _SUBJECT_TITLE.get(subject, f'{subject} Worksheet')
+    title = header.title if header else default_title
+
+    pdf = _BasePDF(f'TEACHER COPY - {_sanitize(title)} - Answer Key')
     pdf.add_page()
 
     # --- Title block ---
@@ -351,7 +397,7 @@ def build_teacher_pdf(questions: list, topic: str, output_path: str, subject: st
     pdf.set_text_color(0, 0, 0)
 
     pdf.set_font('Helvetica', 'B', 18)
-    pdf.cell(0, 11, f'{title} - Full Solutions', align='C', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 11, _sanitize(f'{title} - Full Solutions'), align='C', new_x='LMARGIN', new_y='NEXT')
 
     _render_topic_block(pdf, topic)
 
@@ -421,7 +467,13 @@ def build_teacher_pdf(questions: list, topic: str, output_path: str, subject: st
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
-def generate_pdfs(questions: list, topic: str, output_dir: str, subject: str = 'Mathematics') -> tuple:
+def generate_pdfs(
+    questions: list,
+    topic: str,
+    output_dir: str,
+    subject: str = 'Mathematics',
+    header: WorksheetHeader | None = None,
+) -> tuple:
     """Generate both PDFs. Returns (student_path, teacher_path)."""
     os.makedirs(output_dir, exist_ok=True)
 
@@ -434,7 +486,7 @@ def generate_pdfs(questions: list, topic: str, output_dir: str, subject: str = '
     student_path = os.path.join(output_dir, f'worksheet_{safe_topic}_{date_tag}.pdf')
     teacher_path = os.path.join(output_dir, f'answers_{safe_topic}_{date_tag}.pdf')
 
-    build_student_pdf(questions, topic, student_path, subject)
-    build_teacher_pdf(questions, topic, teacher_path, subject)
+    build_student_pdf(questions, topic, student_path, subject, header)
+    build_teacher_pdf(questions, topic, teacher_path, subject, header)
 
     return student_path, teacher_path

@@ -27,12 +27,15 @@ from services.worksheet_service import (
     QuestionFetchWorker,
 )
 from ui.image_panel import ImagePanel
+from ui.header_options_dialog import HeaderOptionsDialog
 from ui.options_panel import OptionsPanel
 from ui.page_range_dialog import PageRangeDialog
 from ui.progress_dialog import ProgressDialog
 from ui.review_dialog import ReviewDialog
 from ui.settings_dialog import SettingsDialog
+import utils.question_bank as question_bank
 from utils.logger import setup_logger
+from PyQt6.QtWidgets import QFileDialog
 
 logger = setup_logger(__name__)
 
@@ -154,6 +157,13 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        load_q_act = QAction('Load Questions from File…', self)
+        load_q_act.setShortcut('Ctrl+L')
+        load_q_act.triggered.connect(self._on_load_questions_file)
+        file_menu.addAction(load_q_act)
+
+        file_menu.addSeparator()
+
         exit_act = QAction('Exit', self)
         exit_act.setShortcut('Ctrl+Q')
         exit_act.triggered.connect(self.close)
@@ -162,6 +172,65 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Slots
     # ------------------------------------------------------------------
+
+    def _on_load_questions_file(self):
+        """File menu: load a saved question bank and open ReviewDialog for it."""
+        start_dir = self._pending_output_dir or ''
+        path, _ = QFileDialog.getOpenFileName(
+            self, 'Load Question Bank', start_dir, 'Question Bank (*.json)'
+        )
+        if not path:
+            return
+        try:
+            data = question_bank.load(path)
+        except Exception as exc:
+            QMessageBox.critical(self, 'Load Failed', f'Could not load file:\n{exc}')
+            return
+
+        questions = data.get('questions', [])
+        if not questions:
+            QMessageBox.information(self, 'Empty File', 'The selected file contains no questions.')
+            return
+
+        topic   = data.get('topic',   self._pending_topic or 'Loaded Questions')
+        subject = data.get('subject', self._current_subject or 'General')
+        output_dir = self._pending_output_dir
+
+        self._pending_topic = topic
+        dlg = ReviewDialog(questions, topic, subject, output_dir=output_dir, parent=self)
+        if dlg.exec() != ReviewDialog.DialogCode.Accepted:
+            return
+
+        selected = dlg.get_selected_questions()
+        if not selected:
+            return
+
+        self._launch_pdf_creation(selected, topic, subject, output_dir)
+
+    def _launch_pdf_creation(self, questions: list, topic: str, subject: str, output_dir: str):
+        """Show HeaderOptionsDialog then start PDFCreateWorker."""
+        default_title = f'{subject} Worksheet'
+        default_grade = self._options_panel.get_grade()
+        header_dlg = HeaderOptionsDialog(default_title, default_grade, parent=self)
+        if header_dlg.exec() != HeaderOptionsDialog.DialogCode.Accepted:
+            self._update_generate_btn()
+            self._status.showMessage('PDF creation cancelled.')
+            return
+
+        header = header_dlg.get_header()
+
+        self._progress = ProgressDialog(self)
+        self._progress.set_step('Creating PDF files...')
+
+        self._pdf_create_worker = PDFCreateWorker(
+            questions, topic, output_dir, subject, header
+        )
+        self._pdf_create_worker.step_updated.connect(self._progress.set_step)
+        self._pdf_create_worker.finished.connect(self._on_generation_done)
+        self._pdf_create_worker.error.connect(self._on_generation_error)
+        self._pdf_create_worker.start()
+
+        self._progress.exec()
 
     def _open_settings(self):
         SettingsDialog(self._config, parent=self).exec()
@@ -239,6 +308,7 @@ class MainWindow(QMainWindow):
             return
 
         self._cancel_analysis_workers()
+        self._options_panel.set_topic('')
         self._options_panel.reset_approval()
         self._image_panel.set_analyzing(True)
         self._generate_btn.setEnabled(False)
@@ -267,10 +337,9 @@ class MainWindow(QMainWindow):
             self._analysis_worker.start()
 
     def _collect_page_ranges(self, pdf_paths: list[str]) -> dict[str, tuple[int, int]] | None:
-        """For each PDF that exceeds max_pdf_pages, show a PageRangeDialog.
+        """For every PDF show a PageRangeDialog so the user can choose which pages to analyze.
 
-        Returns a dict mapping path → (start, end) for every oversized PDF,
-        with un-constrained PDFs absent from the dict (worker uses full range).
+        Returns a dict mapping path → (start, end) for every PDF.
         Returns None if the user cancelled any dialog.
         """
         from utils.pdf_reader import get_page_count
@@ -281,20 +350,23 @@ class MainWindow(QMainWindow):
                 total = get_page_count(path)
             except Exception:
                 continue   # let the worker surface any real read error
-            if total > max_pages:
-                dlg = PageRangeDialog(
-                    os.path.basename(path), total, max_pages, parent=self
-                )
-                if dlg.exec() != PageRangeDialog.DialogCode.Accepted:
-                    return None
-                ranges[path] = (dlg.start_page, dlg.end_page)
+            # Pass max_pages only when it's actually a binding constraint
+            constraint = max_pages if total > max_pages else None
+            dlg = PageRangeDialog(
+                os.path.basename(path), total, constraint, parent=self
+            )
+            if dlg.exec() != PageRangeDialog.DialogCode.Accepted:
+                return None
+            ranges[path] = (dlg.start_page, dlg.end_page)
         return ranges
 
     def _on_analysis_done(self, topic: str):
         self._image_panel.set_analyzing(False)
         self._options_panel.set_topic(topic)
         self._status.showMessage(
-            'Analysis complete. Review the content above, tick the checkbox, then click Generate.'
+            'Analysis complete. Tick the checkbox and click Generate. '
+            'For more questions: re-upload the same PDF with a different page range, '
+            'generate, then use “Append from file…” in the Review dialog to merge batches.'
         )
         logger.info('Image analysis complete.')
 
@@ -306,14 +378,14 @@ class MainWindow(QMainWindow):
             f'Could not analyze the file automatically:\n\n{error}\n\n'
             'You can manually type the topic description in the right panel,\n'
             'then tick the checkbox to enable Generate.',
-        )
+        ) # type: ignore
 
     def _on_generate(self):
         if not self._config.get('groq_api_key'):
             QMessageBox.warning(
                 self, 'API Key Missing',
                 'Please add your Groq API key under File > Settings.',
-            )
+            ) # type: ignore
             return
 
         topic = self._options_panel.get_topic()
@@ -321,7 +393,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self, 'No Topic',
                 'Please upload an image or type a topic description before generating.',
-            )
+            ) # type: ignore
             return
 
         difficulty = self._options_panel.get_difficulty()
@@ -330,7 +402,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self, 'No Grade Selected',
                 'Please select a grade level before generating.',
-            )
+            ) # type: ignore
             return
         num_questions = self._options_panel.get_num_questions()
         output_dir = self._options_panel.get_output_dir()
@@ -351,12 +423,12 @@ class MainWindow(QMainWindow):
             topic, difficulty, num_questions, self._current_subject,
             question_types, grade,
         )
-        self._fetch_worker.step_updated.connect(self._progress.set_step)
-        self._fetch_worker.questions_ready.connect(self._on_questions_ready)
-        self._fetch_worker.error.connect(self._on_generation_error)
+        self._fetch_worker.step_updated.connect(self._progress.set_step) # type: ignore
+        self._fetch_worker.questions_ready.connect(self._on_questions_ready) # type: ignore
+        self._fetch_worker.error.connect(self._on_generation_error) # type: ignore
         self._fetch_worker.start()
 
-        self._progress.exec()   # blocks until accept()/reject() called from worker signals
+        self._progress.exec()   # type: ignore # blocks until accept()/reject() called from worker signals
 
     def _on_questions_ready(self, questions: list):
         """Called when the AI returns questions — close progress, open review dialog."""
@@ -364,7 +436,8 @@ class MainWindow(QMainWindow):
             self._progress.accept()
 
         dlg = ReviewDialog(
-            questions, self._pending_topic, self._current_subject, parent=self
+            questions, self._pending_topic, self._current_subject,
+            output_dir=self._pending_output_dir, parent=self,
         )
         if dlg.exec() != ReviewDialog.DialogCode.Accepted:
             self._update_generate_btn()
@@ -376,19 +449,9 @@ class MainWindow(QMainWindow):
             self._update_generate_btn()
             return
 
-        self._progress = ProgressDialog(self)
-        self._progress.set_step('Creating PDF files...')
-
-        self._pdf_create_worker = PDFCreateWorker(
-            selected, self._pending_topic,
-            self._pending_output_dir, self._current_subject,
+        self._launch_pdf_creation(
+            selected, self._pending_topic, self._current_subject, self._pending_output_dir
         )
-        self._pdf_create_worker.step_updated.connect(self._progress.set_step)
-        self._pdf_create_worker.finished.connect(self._on_generation_done)
-        self._pdf_create_worker.error.connect(self._on_generation_error)
-        self._pdf_create_worker.start()
-
-        self._progress.exec()
 
     def _on_generation_done(self, student_path: str, teacher_path: str):
         if self._progress:
@@ -407,12 +470,49 @@ class MainWindow(QMainWindow):
             f'Student worksheet:\n{student_path}\n\n'
             f'Teacher answer key:\n{teacher_path}'
         )
-        open_btn = msg.addButton('Open Output Folder', QMessageBox.ButtonRole.ActionRole)
+        open_btn  = msg.addButton('Open Output Folder', QMessageBox.ButtonRole.ActionRole)
+        clean_btn = msg.addButton('Clean Up Saved Questions', QMessageBox.ButtonRole.DestructiveRole)
         msg.addButton(QMessageBox.StandardButton.Ok)
         msg.exec()
 
-        if msg.clickedButton() == open_btn:
+        clicked = msg.clickedButton()
+        if clicked == open_btn:
             subprocess.Popen(f'explorer /select,"{student_path}"')
+        elif clicked == clean_btn:
+            self._delete_question_bank(folder)
+
+    def _delete_question_bank(self, output_folder: str):
+        """Delete all JSON files from the question_bank sub-folder, then remove it if empty."""
+        import glob
+        import shutil
+        bank_dir = os.path.join(output_folder, 'question_bank')
+        if not os.path.isdir(bank_dir):
+            QMessageBox.information(self, 'Nothing to Clean',
+                                    'No saved question files were found.')
+            return
+        files = glob.glob(os.path.join(bank_dir, '*.json'))
+        if not files:
+            QMessageBox.information(self, 'Nothing to Clean',
+                                    'No saved question files were found.')
+            return
+        reply = QMessageBox.question(
+            self, 'Clean Up Saved Questions',
+            f'Delete {len(files)} saved question file(s) from:\n{bank_dir}\n\n'
+            'This cannot be undone.',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            for f in files:
+                os.remove(f)
+            # Remove the folder itself if now empty
+            if not os.listdir(bank_dir):
+                shutil.rmtree(bank_dir, ignore_errors=True)
+            self._status.showMessage(f'Deleted {len(files)} question file(s).')
+            logger.info('Deleted %d question bank file(s) from %s', len(files), bank_dir)
+        except Exception as exc:
+            QMessageBox.warning(self, 'Clean Up Failed', f'Could not delete all files:\n{exc}')
 
     def _on_generation_error(self, error: str):
         if self._progress:

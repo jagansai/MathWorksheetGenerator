@@ -1,12 +1,16 @@
 """Review dialog — lets the user inspect and deselect questions before PDF creation."""
+import os
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -14,6 +18,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+import utils.question_bank as question_bank
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -59,6 +64,15 @@ class _QuestionRow(QWidget):
         top.addWidget(self._check, 0)
         top.addWidget(num_label, 0)
         top.addWidget(self._q_label, 1)
+
+        # Source badge (shown only for appended question sets)
+        source = q.get('_source', '')
+        if source:
+            src_label = QLabel(f'[{source}]')
+            src_label.setStyleSheet('color: #888; font-size: 10px; font-style: italic;')
+            src_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            top.addWidget(src_label, 0)
+
         top.addWidget(self._toggle_btn, 0)
         root.addLayout(top)
 
@@ -126,11 +140,13 @@ class _QuestionRow(QWidget):
 class ReviewDialog(QDialog):
     """Shows AI-generated questions so the user can deselect any before PDF creation."""
 
-    def __init__(self, questions: list, topic: str, subject: str, parent=None):
+    def __init__(self, questions: list, topic: str, subject: str,
+                 output_dir: str = '', parent=None):
         super().__init__(parent)
         self._questions = questions
         self._topic = topic
         self._subject = subject
+        self._output_dir = output_dir
         self._rows: list[_QuestionRow] = []
         self.setWindowTitle('Review Questions')
         self.setMinimumSize(700, 520)
@@ -155,7 +171,7 @@ class ReviewDialog(QDialog):
         header.setWordWrap(True)
         root.addWidget(header)
 
-        # Select-all / Deselect-all toolbar
+        # Select-all / Deselect-all / question-bank toolbar
         toolbar = QHBoxLayout()
         sel_all_btn = QPushButton('Select All')
         sel_all_btn.setFixedWidth(90)
@@ -163,8 +179,20 @@ class ReviewDialog(QDialog):
         desel_btn = QPushButton('Deselect All')
         desel_btn.setFixedWidth(90)
         desel_btn.clicked.connect(self._deselect_all)
+
+        save_btn = QPushButton('Save Questions')
+        save_btn.setToolTip('Save the current question list to a JSON file')
+        save_btn.clicked.connect(self._save_questions)
+
+        append_btn = QPushButton('Append from file…')
+        append_btn.setToolTip('Load a previously saved question file and add its questions to this list')
+        append_btn.clicked.connect(self._load_and_append)
+
         toolbar.addWidget(sel_all_btn)
         toolbar.addWidget(desel_btn)
+        toolbar.addSpacing(16)
+        toolbar.addWidget(save_btn)
+        toolbar.addWidget(append_btn)
         toolbar.addStretch()
         root.addLayout(toolbar)
 
@@ -185,6 +213,7 @@ class ReviewDialog(QDialog):
             list_layout.addWidget(row)
 
         list_layout.addStretch()
+        self._list_layout = list_layout   # kept for dynamic appending
         scroll.setWidget(list_widget)
         root.addWidget(scroll, 1)
 
@@ -230,6 +259,90 @@ class ReviewDialog(QDialog):
         n = sum(1 for r in self._rows if r.is_selected())
         self._create_btn.setText(f'Create PDF  ({n} question{"s" if n != 1 else ""} selected)')
         self._create_btn.setEnabled(n > 0)
+
+    # ── Question bank helpers ──────────────────────────────────────────
+
+    def _save_questions(self):
+        """Save the current question list to a JSON file in the output directory."""
+        qs = [r.question_data() for r in self._rows]
+        if not qs:
+            QMessageBox.information(self, 'No Questions', 'There are no questions to save.')
+            return
+
+        if self._output_dir:
+            try:
+                path = question_bank.save(qs, self._topic, self._subject, self._output_dir)
+                QMessageBox.information(
+                    self, 'Questions Saved',
+                    f'Saved {len(qs)} question(s) to:\n{path}'
+                )
+                return
+            except Exception as exc:
+                # Fall through to manual file picker
+                pass
+
+        # No output_dir or save failed — ask user where to save
+        path, _ = QFileDialog.getSaveFileName(
+            self, 'Save Questions', '', 'Question Bank (*.json)'
+        )
+        if not path:
+            return
+        if not path.lower().endswith('.json'):
+            path += '.json'
+        try:
+            import json
+            payload = {
+                'subject': self._subject,
+                'topic': self._topic,
+                'questions': qs,
+            }
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            QMessageBox.information(
+                self, 'Questions Saved',
+                f'Saved {len(qs)} question(s) to:\n{path}'
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, 'Save Failed', f'Could not save questions:\n{exc}')
+
+    def _load_and_append(self):
+        """Open a question bank file and append its questions to the current list."""
+        start_dir = self._output_dir or ''
+        path, _ = QFileDialog.getOpenFileName(
+            self, 'Load Question Bank', start_dir, 'Question Bank (*.json)'
+        )
+        if not path:
+            return
+        try:
+            data = question_bank.load(path)
+        except Exception as exc:
+            QMessageBox.critical(self, 'Load Failed', f'Could not load file:\n{exc}')
+            return
+
+        new_qs = data.get('questions', [])
+        if not new_qs:
+            QMessageBox.information(self, 'Empty File', 'The selected file contains no questions.')
+            return
+
+        source_label = os.path.splitext(os.path.basename(path))[0]
+        # Keep badge short
+        if len(source_label) > 30:
+            source_label = source_label[:27] + '...'
+
+        self._append_questions(new_qs, source_label)
+        self._refresh_create_btn()
+
+    def _append_questions(self, new_qs: list, source_label: str):
+        """Add *new_qs* as new rows after the existing ones, tagged with *source_label*."""
+        start_index = len(self._rows) + 1
+        for offset, q in enumerate(new_qs):
+            tagged_q = dict(q)   # shallow copy so we don't mutate the original
+            tagged_q['_source'] = source_label
+            row = _QuestionRow(start_index + offset, tagged_q)
+            row.connect_changed(self._refresh_create_btn)
+            self._rows.append(row)
+            # Insert before the trailing stretch item
+            self._list_layout.insertWidget(self._list_layout.count() - 1, row)
 
     # ------------------------------------------------------------------
     # Public API

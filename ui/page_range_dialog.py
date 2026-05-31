@@ -1,4 +1,4 @@
-"""Dialog that asks the user to pick a page range from an oversized PDF."""
+"""Dialog that lets the user choose a page range before analyzing a PDF."""
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog,
@@ -11,32 +11,57 @@ from PyQt6.QtWidgets import (
 
 
 class PageRangeDialog(QDialog):
-    """Modal dialog shown when a PDF exceeds the analysis page limit.
+    """Modal dialog shown before analyzing a PDF so the user can pick a page range.
+
+    When *max_pages* is ``None`` (or >= *total_pages*) there is no upper-limit
+    constraint — the dialog still lets the user narrow the range but won't show
+    a "too many pages" warning.
 
     After ``exec()`` returns ``QDialog.DialogCode.Accepted``, read the chosen
     range via ``start_page`` and ``end_page`` (both 1-based, inclusive).
     """
 
-    def __init__(self, filename: str, total_pages: int, max_pages: int, parent=None):
+    def __init__(
+        self,
+        filename: str,
+        total_pages: int,
+        max_pages: int | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.setWindowTitle('Select Page Range')
-        self.setMinimumWidth(380)
+        self.setMinimumWidth(420)
         self.setWindowFlags(
             self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
         )
+
+        # If no limit or limit >= total, treat as unconstrained
+        self._max_pages = max_pages if (max_pages and max_pages < total_pages) else None
+        self._total_pages = total_pages
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(12)
 
-        info = QLabel(
-            f'<b>{filename}</b> has <b>{total_pages} pages</b>.<br>'
-            f'Only up to <b>{max_pages} pages</b> can be analyzed at once.<br>'
-            f'Choose which pages to include:'
-        )
+        # ── Info / tip label ────────────────────────────────────────────────
+        if self._max_pages:
+            info_text = (
+                f'<b>{filename}</b> has <b>{total_pages} pages</b>.<br>'
+                f'Only up to <b>{self._max_pages} pages</b> can be analyzed at once.<br>'
+                f'Choose which pages to include:'
+            )
+        else:
+            info_text = (
+                f'<b>{filename}</b> has <b>{total_pages} pages</b>.<br>'
+                f'Select the range of pages to analyze.<br>'
+                f'<small><i>Tip: Analyze in batches, save questions each time, '
+                f'then append them all before creating the final PDF.</i></small>'
+            )
+        info = QLabel(info_text)
         info.setWordWrap(True)
         layout.addWidget(info)
 
+        # ── Spinboxes ───────────────────────────────────────────────────────
         range_row = QHBoxLayout()
         range_row.setSpacing(8)
         range_row.addWidget(QLabel('From page:'))
@@ -53,11 +78,10 @@ class PageRangeDialog(QDialog):
 
         self._end = QSpinBox()
         self._end.setRange(1, total_pages)
-        self._end.setValue(min(max_pages, total_pages))
+        self._end.setValue(min(self._max_pages or total_pages, total_pages))
         self._end.setMinimumWidth(80)
         self._end.setStyleSheet('QSpinBox { padding: 4px 6px; }')
         range_row.addWidget(self._end)
-
         range_row.addStretch()
         layout.addLayout(range_row)
 
@@ -73,7 +97,6 @@ class PageRangeDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        self._max_pages = max_pages
         self._start.valueChanged.connect(self._validate)
         self._end.valueChanged.connect(self._validate)
         self._validate()
@@ -85,7 +108,7 @@ class PageRangeDialog(QDialog):
 
         if end < start:
             self._warning.setText('End page must be greater than or equal to start page.')
-        elif span > self._max_pages:
+        elif self._max_pages and span > self._max_pages:
             self._warning.setText(
                 f'Selected range is {span} pages — please reduce to {self._max_pages} or fewer.'
             )
@@ -95,7 +118,9 @@ class PageRangeDialog(QDialog):
     def _on_accept(self):
         start = self._start.value()
         end   = self._end.value()
-        if end < start or (end - start + 1) > self._max_pages:
+        if end < start:
+            return
+        if self._max_pages and (end - start + 1) > self._max_pages:
             return  # keep dialog open
         self.accept()
 
