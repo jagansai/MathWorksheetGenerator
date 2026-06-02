@@ -200,3 +200,6 @@ Add it to `.gitignore`:
 ```
 config/config.json
 ```
+
+## Screenshot
+![Screenshot of the Math Worksheet Generator app showing the main window with file upload panel, topic description, and settings dialog](assets/screenshots.jpg)
