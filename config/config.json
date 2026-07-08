@@ -1,19 +1,24 @@
 {
-  "text_model": "llama-3.3-70b-versatile",
-  "text_model_options": [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "gemma2-9b-it"
-  ],
-  "vision_model": "meta-llama/llama-4-scout-17b-16e-instruct",
-  "output_directory": "",
-  "default_num_questions": 10,
-  "max_num_questions": 25,
-  "default_difficulty": "Intermediate",
-  "default_grade": "",
-  "max_image_size_mb": 8,
-  "max_pdf_size_mb": 25,
-  "max_files": 10,
-  "max_pdf_pages": 50,
-  "subjects" : ["Mathematics", "Physics", "Chemistry", "Biology"]
+    "text_model": "llama-3.3-70b-versatile",
+    "text_model_options": [
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "gemma2-9b-it"
+    ],
+    "vision_model": "meta-llama/llama-4-scout-17b-16e-instruct",
+    "output_directory": "",
+    "default_num_questions": 10,
+    "max_num_questions": 25,
+    "default_difficulty": "Intermediate",
+    "default_grade": "",
+    "max_image_size_mb": 8,
+    "max_pdf_size_mb": 25,
+    "max_files": 10,
+    "max_pdf_pages": 50,
+    "subjects": [
+        "Mathematics",
+        "Physics",
+        "Chemistry",
+        "Biology"
+    ]
 }

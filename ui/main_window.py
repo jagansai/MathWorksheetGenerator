@@ -207,8 +207,25 @@ class MainWindow(QMainWindow):
 
         self._launch_pdf_creation(selected, topic, subject, output_dir)
 
+    def _confirm_duplicate_warning(self) -> bool:
+        """Ask the user whether to proceed when duplicate or near-duplicate questions may exist."""
+        reply = QMessageBox.question(
+            self,
+            'Possible Duplicate or Near-Duplicate Questions',
+            'Some of the generated questions may be duplicate or nearly duplicate. '
+            'Would you like to continue and create the worksheet anyway?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
     def _launch_pdf_creation(self, questions: list, topic: str, subject: str, output_dir: str):
         """Show HeaderOptionsDialog then start PDFCreateWorker."""
+        if not self._confirm_duplicate_warning():
+            self._update_generate_btn()
+            self._status.showMessage('PDF creation cancelled after duplicate warning.')
+            return
+
         default_title = f'{subject} Worksheet'
         default_grade = self._options_panel.get_grade()
         header_dlg = HeaderOptionsDialog(default_title, default_grade, parent=self)
@@ -225,22 +242,22 @@ class MainWindow(QMainWindow):
         self._pdf_create_worker = PDFCreateWorker(
             questions, topic, output_dir, subject, header
         )
-        self._pdf_create_worker.step_updated.connect(self._progress.set_step)
-        self._pdf_create_worker.finished.connect(self._on_generation_done)
-        self._pdf_create_worker.error.connect(self._on_generation_error)
+        self._pdf_create_worker.step_updated.connect(self._progress.set_step) # pyright: ignore[reportUnusedCallResult]
+        self._pdf_create_worker.finished.connect(self._on_generation_done) # pyright: ignore[reportUnusedCallResult]
+        self._pdf_create_worker.error.connect(self._on_generation_error) # pyright: ignore[reportUnusedCallResult]
         self._pdf_create_worker.start()
 
-        self._progress.exec()
+        self._progress.exec() # pyright: ignore[reportUnusedCallResult]
 
     def _open_settings(self):
-        SettingsDialog(self._config, parent=self).exec()
+        SettingsDialog(self._config, parent=self).exec() # pyright: ignore[reportUnusedCallResult]
         # Refresh model combo in case the user changed it via Settings
         current = self._config.get('text_model', '')
         idx = self._model_combo.findText(current)
         if idx >= 0:
-            self._model_combo.blockSignals(True)
+            self._model_combo.blockSignals(True) # pyright: ignore[reportUnusedCallResult]
             self._model_combo.setCurrentIndex(idx)
-            self._model_combo.blockSignals(False)
+            self._model_combo.blockSignals(False) # pyright: ignore[reportUnusedCallResult]
 
     def _on_model_changed(self, model: str):
         self._config.set('text_model', model)

@@ -1,5 +1,7 @@
 """QThread workers that orchestrate image analysis and worksheet generation."""
 import asyncio
+import random
+import re
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -13,6 +15,58 @@ if TYPE_CHECKING:
     from utils.config_manager import ConfigManager
 
 logger = setup_logger(__name__)
+
+
+def randomize_mcq_answers(questions: list[dict]) -> None:
+    """Randomize MCQ answer positions in-app and update the answer key text accordingly."""
+    for question in questions:
+        if question.get('type') != 'mcq':
+            continue
+
+        choices = question.get('choices') or []
+        if not isinstance(choices, list) or len(choices) != 4:
+            continue
+
+        parsed_choices: list[tuple[str, str]] = []
+        for item in choices:
+            text = str(item).strip()
+            match = re.match(r'^([A-D])\s*\)\s*(.+)$', text, flags=re.IGNORECASE)
+            if match:
+                parsed_choices.append((match.group(1).upper(), match.group(2).strip()))
+            else:
+                parsed_choices.append(('', text))
+
+        correct_letter = str(question.get('correct_choice', '')).strip().upper()
+        if correct_letter not in {'A', 'B', 'C', 'D'}:
+            correct_letter = next((letter for letter, _ in parsed_choices if letter), '')
+        if not correct_letter:
+            continue
+
+        correct_text = next((text for letter, text in parsed_choices if letter == correct_letter), '')
+        if not correct_text:
+            continue
+
+        possible_positions = [letter for letter in ('A', 'B', 'C', 'D') if letter != correct_letter]
+        if not possible_positions:
+            continue
+        new_letter = random.choice(possible_positions)
+
+        other_texts = [text for letter, text in parsed_choices if letter != correct_letter]
+        random.shuffle(other_texts)
+
+        remapped_choices: list[str] = []
+        for letter in ('A', 'B', 'C', 'D'):
+            if letter == new_letter:
+                remapped_choices.append(f'{letter}) {correct_text}')
+            else:
+                remapped_choices.append(f'{letter}) {other_texts.pop(0)}')
+
+        question['choices'] = remapped_choices
+        question['correct_choice'] = new_letter
+        question['final_answer'] = f'{new_letter}) {correct_text}'
+        if 'answer' in question:
+            question['answer'] = question['final_answer']
+
 
 def _combine_content(topic: str, examples: str) -> str:
     """Merge the topic summary and style examples into a single string for the UI and AI."""
@@ -145,6 +199,7 @@ class WorksheetWorker(QThread):
             self._grade,
         )
         logger.info('Received %d questions from AI', len(questions))
+        randomize_mcq_answers(questions)
 
         self.step_updated.emit('Creating PDF files...')
         # Strip the sample-problems block (style reference only — not for the PDF title)
@@ -204,6 +259,7 @@ class QuestionFetchWorker(QThread):
             self._subject, self._question_types, self._grade,
         )
         logger.info('Received %d questions from AI', len(questions))
+        randomize_mcq_answers(questions)
         self.questions_ready.emit(questions)
 
 
